@@ -1,0 +1,28 @@
+apiVersion: plone.org/v1alpha1
+kind: PloneSite
+metadata:
+  name: simple-plone
+  namespace: default
+spec:
+  # Minimal configuration for a simple Plone site with Volto
+  siteName: "Simple Plone"
+  siteId: "Plone"
+  
+  # Use Volto frontend (default)
+  deploymentType: "volto"
+  
+  # Use default admin credentials (create secret manually)
+  adminUser: "admin"
+  adminPasswordSecret: "plone-admin-password"
+  
+  # Single replica for development
+  replicas: 1
+  
+  # Use ZODB with ZEO (default, no external database needed)
+  database:
+    type: "zodb"
+  
+  # Enable persistence
+  persistence:
+    enabled: true
+    size: "5Gi"

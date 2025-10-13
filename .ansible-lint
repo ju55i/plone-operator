@@ -1,0 +1,15 @@
+# Ansible lint configuration for Plone Operator
+---
+skip_list:
+  - yaml[line-length]  # Allow longer lines in YAML
+  - name[casing]       # Allow flexible task naming
+  - var-naming[no-role-prefix]  # Allow variables without role prefix
+
+warn_list:
+  - experimental
+  - role-name
+
+exclude_paths:
+  - .github/
+  - testbin/
+  - bin/

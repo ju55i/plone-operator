@@ -1,0 +1,343 @@
+---
+# tasks file for plonesite
+- name: Set PloneSite status to Pending
+  operator_sdk.util.k8s_status:
+    api_version: plone.org/v1alpha1
+    kind: PloneSite
+    name: "{{ plone_site_name }}"
+    namespace: "{{ plone_namespace }}"
+    status:
+      phase: "Pending"
+      conditions:
+        - type: "Initializing"
+          status: "True"
+          lastTransitionTime: "{{ ansible_date_time.iso8601 }}"
+          reason: "PreparingHelm"
+          message: "Preparing Helm chart deployment"
+
+- name: Add Plone Helm repository
+  kubernetes.core.helm_repository:
+    name: plone
+    repo_url: "https://plone.github.io/helm-charts"
+
+- name: Build Helm values for Plone deployment
+  set_fact:
+    helm_values:
+      backend:
+        image:
+          repository: "{{ plone_image.split(':')[0] }}"
+          tag: "{{ plone_image.split(':')[1] if ':' in plone_image else 'latest' }}"
+        replicaCount: "{{ plone_replicas }}"
+        resources: "{{ plone_resources }}"
+        env: "{{ plone_environment }}"
+      ingress:
+        enabled: "{{ (plone_vhm_url | length > 0) | bool }}"
+        className: "{{ ingress_class_name | default('') }}"
+        hosts:
+          - host: "{{ plone_vhm_url | regex_replace('^https?://', '') if plone_vhm_url else 'chart-example.local' }}"
+            paths:
+              - path: /
+                pathType: Prefix
+      zeoserver:
+        enabled: "{{ (plone_db_type == 'zodb') | bool }}"
+        persistence:
+          enabled: "{{ plone_persistence_enabled }}"
+          size: "{{ plone_persistence_size }}"
+          storageClass: "{{ plone_persistence_storage_class if plone_persistence_storage_class else omit }}"
+
+- name: Add PostgreSQL configuration for non-ZODB databases
+  set_fact:
+    helm_values: "{{ helm_values | combine({'postgresql': postgresql_config}) }}"
+  vars:
+    postgresql_config:
+      enabled: "{{ (plone_db_type == 'postgresql') | bool }}"
+      persistentVolumeClaim:
+        claimName: "{{ plone_site_name }}-db-pvc"
+      dbsecret:
+        name: "{{ plone_admin_password_secret }}"
+  when: plone_db_type == 'postgresql'
+
+- name: Add backend database host for external PostgreSQL
+  set_fact:
+    helm_values: "{{ helm_values | combine({'backend': backend_db_config}, recursive=True) }}"
+  vars:
+    backend_db_config:
+      databasehost: "{{ plone_db_host }}"
+      databaseport: "{{ plone_db_port }}"
+      dbsecret:
+        name: "{{ plone_db_password_secret }}"
+  when: plone_db_type == 'postgresql' and plone_db_host | length > 0
+
+- name: Add VHM environment variables to backend
+  set_fact:
+    helm_values: "{{ helm_values | combine({'backend': {'env': backend_vhm_env}}, recursive=True) }}"
+  vars:
+    backend_vhm_env: "{{ plone_environment | combine({'SITE': plone_site_id, 'VHM_URL': plone_vhm_url, 'VHM_PATH': '/' + plone_vhm_path}) }}"
+  when: plone_vhm_url | length > 0
+
+- name: Add site ID to backend environment
+  set_fact:
+    helm_values: "{{ helm_values | combine({'backend': {'env': backend_site_env}}, recursive=True) }}"
+  vars:
+    backend_site_env: "{{ plone_environment | combine({'SITE': plone_site_id}) }}"
+  when: plone_vhm_url | length == 0
+
+- name: Select appropriate Helm chart based on deployment type
+  set_fact:
+    helm_chart: "{{ 'plone/plone6-volto-zeo' if (plone_deployment_type == 'volto' and plone_db_type == 'zodb') else ('plone/plone6-volto-pg' if (plone_deployment_type == 'volto' and plone_db_type == 'postgresql') else ('plone/plone6-classic-pg' if (plone_deployment_type == 'classic' and plone_db_type == 'postgresql') else 'plone/plone6-classic-pg')) }}"
+
+- name: Deploy Plone using Helm
+  kubernetes.core.helm:
+    name: "{{ plone_site_name }}"
+    chart_ref: "{{ helm_chart }}"
+    release_namespace: "{{ plone_namespace }}"
+    create_namespace: false
+    values: "{{ helm_values }}"
+    wait: true
+    wait_timeout: "10m"
+
+- name: Get Helm release info
+  kubernetes.core.helm_info:
+    name: "{{ plone_site_name }}"
+    release_namespace: "{{ plone_namespace }}"
+  register: helm_release_info
+
+- name: Determine site URL
+  set_fact:
+    site_url: "{{ plone_vhm_url if plone_vhm_url else 'http://' + plone_site_name + '-frontend.' + plone_namespace + '.svc.cluster.local:3000' }}"
+
+- name: Set PloneSite status to Running
+  operator_sdk.util.k8s_status:
+    api_version: plone.org/v1alpha1
+    kind: PloneSite
+    name: "{{ plone_site_name }}"
+    namespace: "{{ plone_namespace }}"
+    status:
+      phase: "Running"
+      siteUrl: "{{ site_url }}"
+      vhmConfigured: "{{ plone_vhm_url | length > 0 }}"
+      helmRelease: "{{ helm_release_info.status.name }}"
+      helmChart: "{{ helm_chart }}"
+      conditions:
+        - type: "Ready"
+          status: "True"
+          lastTransitionTime: "{{ ansible_date_time.iso8601 }}"
+          reason: "HelmDeploymentReady"
+          message: "Plone site deployed successfully using Helm"
+
+- name: Build PVC spec
+  set_fact:
+    pvc_spec:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: "{{ plone_persistence_size }}"
+
+- name: Add storage class to PVC spec
+  set_fact:
+    pvc_spec: "{{ pvc_spec | combine({'storageClassName': plone_persistence_storage_class}) }}"
+  when: plone_persistence_storage_class | length > 0
+
+- name: Create PersistentVolumeClaim for Plone data
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: "{{ plone_site_name }}-data"
+        namespace: "{{ plone_namespace }}"
+        labels:
+          app: plone
+          plone-site: "{{ plone_site_name }}"
+      spec: "{{ pvc_spec }}"
+  when: plone_persistence_enabled | bool
+
+- name: Build ConfigMap data
+  set_fact:
+    configmap_data:
+      SITE_ID: "{{ plone_site_id }}"
+      SITE_NAME: "{{ site_name | default('Plone') }}"
+      DB_TYPE: "{{ plone_db_type }}"
+
+- name: Add VHM configuration to ConfigMap
+  set_fact:
+    configmap_data: "{{ configmap_data | combine({'VHM_URL': plone_vhm_url, 'VHM_PATH': '/' + plone_vhm_path}) }}"
+  when: plone_vhm_url | length > 0
+
+- name: Add addons to ConfigMap
+  set_fact:
+    configmap_data: "{{ configmap_data | combine({'ADDONS': plone_addons | join(' ')}) }}"
+  when: plone_addons | length > 0
+
+- name: Add database configuration to ConfigMap
+  set_fact:
+    configmap_data: "{{ configmap_data | combine({'DB_HOST': plone_db_host, 'DB_PORT': plone_db_port | string, 'DB_NAME': plone_db_name, 'DB_USER': plone_db_user}) }}"
+  when: plone_db_type != 'zodb'
+
+- name: Create ConfigMap for Plone configuration
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ plone_site_name }}-config"
+        namespace: "{{ plone_namespace }}"
+        labels:
+          app: plone
+          plone-site: "{{ plone_site_name }}"
+      data: "{{ configmap_data }}"
+
+- name: Build base environment variables
+  set_fact:
+    plone_env_vars:
+      - name: SITE
+        value: "{{ plone_site_id }}"
+
+- name: Add VHM environment variables
+  set_fact:
+    plone_env_vars: "{{ plone_env_vars + [{'name': 'VHM_URL', 'value': plone_vhm_url}, {'name': 'VHM_PATH', 'value': '/' + plone_vhm_path}] }}"
+  when: plone_vhm_url | length > 0
+
+- name: Add custom environment variables
+  set_fact:
+    plone_env_vars: "{{ plone_env_vars + [{'name': item.key, 'value': item.value}] }}"
+  loop: "{{ plone_environment | dict2items }}"
+  when: plone_environment | length > 0
+
+- name: Build base container spec
+  set_fact:
+    plone_container_spec:
+      name: plone
+      image: "{{ plone_image }}"
+      imagePullPolicy: IfNotPresent
+      ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+      env: "{{ plone_env_vars }}"
+      envFrom:
+        - configMapRef:
+            name: "{{ plone_site_name }}-config"
+      resources:
+        limits:
+          cpu: "{{ plone_resources.limits.cpu }}"
+          memory: "{{ plone_resources.limits.memory }}"
+        requests:
+          cpu: "{{ plone_resources.requests.cpu }}"
+          memory: "{{ plone_resources.requests.memory }}"
+      livenessProbe:
+        httpGet:
+          path: /
+          port: 8080
+        initialDelaySeconds: 60
+        periodSeconds: 30
+        timeoutSeconds: 10
+      readinessProbe:
+        httpGet:
+          path: /
+          port: 8080
+        initialDelaySeconds: 30
+        periodSeconds: 10
+        timeoutSeconds: 5
+
+- name: Add volume mounts to container spec
+  set_fact:
+    plone_container_spec: "{{ plone_container_spec | combine({'volumeMounts': [{'name': 'plone-data', 'mountPath': '/data'}]}) }}"
+  when: plone_persistence_enabled | bool
+
+- name: Build pod spec
+  set_fact:
+    plone_pod_spec:
+      containers:
+        - "{{ plone_container_spec }}"
+
+- name: Add volumes to pod spec
+  set_fact:
+    plone_pod_spec: "{{ plone_pod_spec | combine({'volumes': [{'name': 'plone-data', 'persistentVolumeClaim': {'claimName': plone_site_name + '-data'}}]}) }}"
+  when: plone_persistence_enabled | bool
+
+- name: Create Deployment for Plone
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: "{{ plone_site_name }}"
+        namespace: "{{ plone_namespace }}"
+        labels:
+          app: plone
+          plone-site: "{{ plone_site_name }}"
+      spec:
+        replicas: "{{ plone_replicas }}"
+        selector:
+          matchLabels:
+            app: plone
+            plone-site: "{{ plone_site_name }}"
+        template:
+          metadata:
+            labels:
+              app: plone
+              plone-site: "{{ plone_site_name }}"
+          spec: "{{ plone_pod_spec }}"
+
+- name: Create Service for Plone
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: "{{ plone_site_name }}"
+        namespace: "{{ plone_namespace }}"
+        labels:
+          app: plone
+          plone-site: "{{ plone_site_name }}"
+      spec:
+        type: ClusterIP
+        ports:
+          - port: 8080
+            targetPort: 8080
+            protocol: TCP
+            name: http
+        selector:
+          app: plone
+          plone-site: "{{ plone_site_name }}"
+
+- name: Wait for Plone deployment to be ready
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    name: "{{ plone_site_name }}"
+    namespace: "{{ plone_namespace }}"
+  register: plone_deployment
+  until:
+    - plone_deployment.resources | length > 0
+    - plone_deployment.resources[0].status.readyReplicas is defined
+    - plone_deployment.resources[0].status.readyReplicas == plone_replicas
+  retries: 30
+  delay: 10
+
+- name: Determine site URL
+  set_fact:
+    site_url: "{{ plone_vhm_url if plone_vhm_url else 'http://' + plone_site_name + '.' + plone_namespace + '.svc.cluster.local:8080' }}"
+
+- name: Set PloneSite status to Running
+  operator_sdk.util.k8s_status:
+    api_version: plone.org/v1alpha1
+    kind: PloneSite
+    name: "{{ plone_site_name }}"
+    namespace: "{{ plone_namespace }}"
+    status:
+      phase: "Running"
+      siteUrl: "{{ site_url }}"
+      vhmConfigured: "{{ plone_vhm_url | length > 0 }}"
+      conditions:
+        - type: "Ready"
+          status: "True"
+          lastTransitionTime: "{{ ansible_date_time.iso8601 }}"
+          reason: "DeploymentReady"
+          message: "Plone site is running and ready"

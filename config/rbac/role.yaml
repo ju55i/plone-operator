@@ -1,0 +1,67 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: plone-operator-role
+rules:
+  # Permissions for managing PloneSite CRDs
+  - apiGroups:
+      - plone.org
+    resources:
+      - plonesites
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - plone.org
+    resources:
+      - plonesites/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - plone.org
+    resources:
+      - plonesites/finalizers
+    verbs:
+      - update
+  # Permissions for managing Kubernetes resources
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - services
+      - services/finalizers
+      - endpoints
+      - persistentvolumeclaims
+      - events
+      - configmaps
+      - secrets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - daemonsets
+      - replicasets
+      - statefulsets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch

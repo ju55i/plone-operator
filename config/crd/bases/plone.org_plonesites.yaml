@@ -1,0 +1,217 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: plonesites.plone.org
+spec:
+  group: plone.org
+  names:
+    kind: PloneSite
+    listKind: PloneSiteList
+    plural: plonesites
+    singular: plonesite
+    shortNames:
+      - ps
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: PloneSite is the Schema for the plonesite API
+          properties:
+            apiVersion:
+              description: 'APIVersion defines the versioned schema of this representation of an object.'
+              type: string
+            kind:
+              description: 'Kind is a string value representing the REST resource this object represents.'
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: Spec defines the desired state of PloneSite
+              type: object
+              properties:
+                siteName:
+                  description: Name of the Plone site to create
+                  type: string
+                  default: "Plone"
+                siteId:
+                  description: ID of the Plone site (URL path component)
+                  type: string
+                  default: "plone"
+                deploymentType:
+                  description: Type of deployment (volto for frontend+backend, classic for backend-only)
+                  type: string
+                  default: "volto"
+                  enum:
+                    - volto
+                    - classic
+                adminUser:
+                  description: Admin username for the Plone site
+                  type: string
+                  default: "admin"
+                adminPasswordSecret:
+                  description: Secret name containing the admin password
+                  type: string
+                  default: "plone-admin-password"
+                image:
+                  description: Plone backend container image
+                  type: string
+                  default: "plone/plone-backend:6.0"
+                replicas:
+                  description: Number of Plone replicas
+                  type: integer
+                  default: 1
+                  minimum: 1
+                resources:
+                  description: Resource requirements for Plone containers
+                  type: object
+                  properties:
+                    limits:
+                      type: object
+                      properties:
+                        cpu:
+                          type: string
+                          default: "2000m"
+                        memory:
+                          type: string
+                          default: "2Gi"
+                    requests:
+                      type: object
+                      properties:
+                        cpu:
+                          type: string
+                          default: "500m"
+                        memory:
+                          type: string
+                          default: "512Mi"
+                vhmUrl:
+                  description: Virtual Host Monster URL for the site (e.g., https://example.com)
+                  type: string
+                vhmPath:
+                  description: Virtual Host Monster path (default is the siteId)
+                  type: string
+                ingress:
+                  description: Ingress configuration
+                  type: object
+                  properties:
+                    enabled:
+                      description: Enable ingress
+                      type: boolean
+                      default: false
+                    className:
+                      description: Ingress class name (e.g., nginx, traefik)
+                      type: string
+                    tls:
+                      description: Enable TLS
+                      type: boolean
+                      default: false
+                database:
+                  description: Database configuration
+                  type: object
+                  properties:
+                    type:
+                      description: Database type (zodb, postgresql, mysql)
+                      type: string
+                      default: "zodb"
+                      enum:
+                        - zodb
+                        - postgresql
+                        - mysql
+                    host:
+                      description: Database host
+                      type: string
+                    port:
+                      description: Database port
+                      type: integer
+                    name:
+                      description: Database name
+                      type: string
+                    user:
+                      description: Database user
+                      type: string
+                    passwordSecret:
+                      description: Secret name containing database password
+                      type: string
+                persistence:
+                  description: Persistence configuration
+                  type: object
+                  properties:
+                    enabled:
+                      description: Enable persistent storage
+                      type: boolean
+                      default: true
+                    storageClass:
+                      description: Storage class for persistent volume
+                      type: string
+                    size:
+                      description: Size of persistent volume
+                      type: string
+                      default: "10Gi"
+                addons:
+                  description: List of Plone add-ons to install
+                  type: array
+                  items:
+                    type: string
+                environment:
+                  description: Additional environment variables
+                  type: object
+                  additionalProperties:
+                    type: string
+            status:
+              description: Status defines the observed state of PloneSite
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+              properties:
+                conditions:
+                  description: Conditions represent the latest available observations of the PloneSite's state
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                phase:
+                  description: Phase of the PloneSite (Pending, Running, Failed)
+                  type: string
+                siteUrl:
+                  description: URL to access the Plone site
+                  type: string
+                vhmConfigured:
+                  description: Whether VHM is configured
+                  type: boolean
+                helmRelease:
+                  description: Helm release name
+                  type: string
+                helmChart:
+                  description: Helm chart used for deployment
+                  type: string
+                deploymentType:
+                  description: Type of deployment (volto or classic)
+                  type: string
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Site URL
+          type: string
+          jsonPath: .status.siteUrl
+        - name: VHM
+          type: boolean
+          jsonPath: .status.vhmConfigured
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

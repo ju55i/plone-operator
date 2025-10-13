@@ -1,0 +1,62 @@
+apiVersion: plone.org/v1alpha1
+kind: PloneSite
+metadata:
+  name: plone-with-postgresql
+  namespace: default
+spec:
+  # Site configuration
+  siteName: "Plone with PostgreSQL"
+  siteId: "Plone"
+  
+  # Use Volto frontend
+  deploymentType: "volto"
+  
+  # Admin credentials
+  adminUser: "admin"
+  adminPasswordSecret: "plone-admin-password"
+  
+  # Backend image
+  image: "plone/plone-backend:6.0"
+  
+  # High availability setup
+  replicas: 3
+  
+  # Virtual Host Monster for production
+  vhmUrl: "https://www.example.com"
+  vhmPath: "Plone"
+  
+  # Ingress with TLS
+  ingress:
+    enabled: true
+    className: "nginx"
+    tls: true
+  
+  # Production resources
+  resources:
+    limits:
+      cpu: "4000m"
+      memory: "4Gi"
+    requests:
+      cpu: "1000m"
+      memory: "1Gi"
+  
+  # PostgreSQL database
+  # This will deploy a PostgreSQL StatefulSet with the Plone instance
+  database:
+    type: "postgresql"
+  
+  # Persistent storage
+  persistence:
+    enabled: true
+    storageClass: "fast-ssd"
+    size: "50Gi"
+  
+  # Plone add-ons
+  addons:
+    - "plone.restapi"
+    - "plone.volto"
+  
+  # Environment variables
+  environment:
+    TZ: "America/New_York"
+    CORS_ALLOW_ORIGIN: "https://www.example.com"

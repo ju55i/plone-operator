@@ -1,0 +1,8 @@
+---
+# Watches configuration for the Plone Operator
+- version: v1alpha1
+  group: plone.org
+  kind: PloneSite
+  role: plonesite
+  reconcilePeriod: 30s
+  manageStatus: true

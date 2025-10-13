@@ -1,0 +1,64 @@
+apiVersion: plone.org/v1alpha1
+kind: PloneSite
+metadata:
+  name: my-plone-site
+  namespace: default
+spec:
+  # Site configuration
+  siteName: "My Plone Site"
+  siteId: "plone"
+  
+  # Deployment type: 'volto' (frontend+backend) or 'classic' (backend-only)
+  deploymentType: "volto"
+  
+  # Admin credentials
+  adminUser: "admin"
+  adminPasswordSecret: "plone-admin-password"
+  
+  # Plone backend image
+  image: "plone/plone-backend:6.0"
+  
+  # Number of replicas
+  replicas: 2
+  
+  # Virtual Host Monster configuration
+  # This allows Plone to generate correct URLs when behind a proxy/ingress
+  vhmUrl: "https://myplone.example.com"
+  vhmPath: "plone"
+  
+  # Ingress configuration
+  ingress:
+    enabled: true
+    className: "nginx"  # or "traefik" depending on your ingress controller
+    tls: true
+  
+  # Resource requirements
+  resources:
+    limits:
+      cpu: "2000m"
+      memory: "2Gi"
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+  
+  # Database configuration
+  # 'zodb' uses ZEO server (included in helm chart)
+  # 'postgresql' uses PostgreSQL (can be included or external)
+  database:
+    type: "zodb"
+  
+  # Persistence configuration
+  persistence:
+    enabled: true
+    storageClass: ""  # Use default storage class
+    size: "10Gi"
+  
+  # Optional: Plone add-ons to install
+  addons:
+    - "plone.restapi"
+    - "plone.volto"
+  
+  # Optional: Additional environment variables
+  environment:
+    TZ: "UTC"
+    CORS_ALLOW_ORIGIN: "*"

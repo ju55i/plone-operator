@@ -1,0 +1,54 @@
+apiVersion: plone.org/v1alpha1
+kind: PloneSite
+metadata:
+  name: plone-classic
+  namespace: default
+spec:
+  # Classic Plone deployment (no Volto frontend)
+  siteName: "Plone Classic"
+  siteId: "Plone"
+  
+  # Use Classic UI (traditional Plone interface)
+  deploymentType: "classic"
+  
+  # Admin credentials
+  adminUser: "admin"
+  adminPasswordSecret: "plone-admin-password"
+  
+  # Backend image
+  image: "plone/plone-backend:6.0"
+  
+  # Number of replicas
+  replicas: 2
+  
+  # VHM for external access
+  vhmUrl: "https://classic.example.com"
+  vhmPath: "Plone"
+  
+  # Ingress configuration
+  ingress:
+    enabled: true
+    className: "nginx"
+    tls: true
+  
+  # Use PostgreSQL with RelStorage
+  database:
+    type: "postgresql"
+  
+  # Persistence
+  persistence:
+    enabled: true
+    size: "20Gi"
+  
+  # Resources
+  resources:
+    limits:
+      cpu: "2000m"
+      memory: "2Gi"
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+  
+  # Environment
+  environment:
+    TZ: "UTC"
