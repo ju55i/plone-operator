@@ -17,6 +17,7 @@ docker-push:
 # Deploy the operator to the K8s cluster
 .PHONY: deploy
 deploy:
+	kubectl apply -f config/manager/namespace.yaml
 	kubectl apply -f config/crd/bases/
 	kubectl apply -f config/rbac/
 	kubectl apply -f config/manager/
@@ -48,12 +49,21 @@ deploy-sample:
 undeploy-sample:
 	kubectl delete -f config/samples/ --ignore-not-found=true
 
-# Run ansible-lint on roles
+# Lint: check Python code with ruff
 .PHONY: lint
 lint:
-	ansible-lint roles/
+	uv run ruff check plone_operator.py
 
 # Generate bundle
 .PHONY: bundle
 bundle:
 	@echo "Generating operator bundle..."
+
+# Build and load the operator image into a running minikube cluster
+.PHONY: minikube-load
+minikube-load: docker-build
+	minikube image load ${IMG}
+
+# Full local minikube deployment: build image, load it, then deploy operator
+.PHONY: minikube-deploy
+minikube-deploy: minikube-load deploy

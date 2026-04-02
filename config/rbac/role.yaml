@@ -65,3 +65,41 @@ rules:
       - patch
       - update
       - watch
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - ingresses
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # Permissions for creating DB pack Jobs
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # Permissions for managing CloudNativePG Cluster resources
+  - apiGroups:
+      - postgresql.cnpg.io
+    resources:
+      - clusters
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch

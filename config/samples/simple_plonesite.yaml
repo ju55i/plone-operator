@@ -7,22 +7,32 @@ spec:
   # Minimal configuration for a simple Plone site with Volto
   siteName: "Simple Plone"
   siteId: "Plone"
-  
+
   # Use Volto frontend (default)
   deploymentType: "volto"
-  
+
   # Use default admin credentials (create secret manually)
   adminUser: "admin"
   adminPasswordSecret: "plone-admin-password"
-  
+
   # Single replica for development
   replicas: 1
-  
+
   # Use ZODB with ZEO (default, no external database needed)
   database:
     type: "zodb"
-  
+
   # Enable persistence
   persistence:
     enabled: true
     size: "5Gi"
+
+  # --- Seamless mode (local dev) ---
+  # Without vhmUrl, the frontend Service is NodePort so you can access it via:
+  #   minikube service simple-plone-frontend
+  #
+  # For port-forward dev access with full seamless mode proxying, set vhmUrl and run:
+  #   kubectl port-forward svc/simple-plone-frontend 3000:3000
+  # Then browse to http://localhost:3000
+  #
+  # vhmUrl: "http://localhost:3000"

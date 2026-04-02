@@ -1,18 +1,21 @@
-FROM quay.io/operator-framework/ansible-operator:latest
+FROM python:3.12-slim
 
-# Copy CRDs
-COPY config/crd/bases /opt/ansible/config/crd/bases
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Copy roles
-COPY roles/ ${HOME}/roles/
+WORKDIR /app
 
-# Copy watches configuration
-COPY watches.yaml ${HOME}/watches.yaml
+# Copy lockfile and project metadata first for layer caching
+COPY pyproject.toml uv.lock ./
 
-# Copy requirements
-COPY requirements.yml ${HOME}/requirements.yml
+# Install dependencies (no project itself, just deps)
+RUN uv sync --frozen --no-dev --no-install-project
 
-# Install Ansible collections
-RUN ansible-galaxy collection install -r ${HOME}/requirements.yml
+# Copy operator source
+COPY plone_operator.py .
 
-USER ${USER_UID}
+# Run as non-root
+RUN useradd -u 1000 -m plone-operator
+USER 1000
+
+ENTRYPOINT ["uv", "run", "--frozen", "kopf", "run", "--all-namespaces", "--liveness=http://0.0.0.0:8080/healthz", "plone_operator.py"]

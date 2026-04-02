@@ -23,37 +23,29 @@ spec:
           image: plone-operator:latest
           imagePullPolicy: IfNotPresent
           env:
-            - name: WATCH_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
             - name: POD_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
             - name: OPERATOR_NAME
               value: "plone-operator"
-            - name: ANSIBLE_GATHERING
-              value: explicit
-            - name: ANSIBLE_DEBUG_LOGS
-              value: "false"
           resources:
             limits:
               cpu: 500m
-              memory: 768Mi
+              memory: 256Mi
             requests:
               cpu: 100m
-              memory: 256Mi
+              memory: 128Mi
           livenessProbe:
             httpGet:
               path: /healthz
-              port: 6789
+              port: 8080
             initialDelaySeconds: 15
             periodSeconds: 20
           readinessProbe:
             httpGet:
-              path: /readyz
-              port: 6789
+              path: /healthz
+              port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
       terminationGracePeriodSeconds: 10

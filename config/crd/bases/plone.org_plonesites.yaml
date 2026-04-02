@@ -59,7 +59,11 @@ spec:
                 image:
                   description: Plone backend container image
                   type: string
-                  default: "plone/plone-backend:6.0"
+                  default: "plone/plone-backend:latest"
+                frontendImage:
+                  description: Plone frontend (Volto) container image
+                  type: string
+                  default: "plone/plone-frontend:latest"
                 replicas:
                   description: Number of Plone replicas
                   type: integer
@@ -191,12 +195,6 @@ spec:
                 vhmConfigured:
                   description: Whether VHM is configured
                   type: boolean
-                helmRelease:
-                  description: Helm release name
-                  type: string
-                helmChart:
-                  description: Helm chart used for deployment
-                  type: string
                 deploymentType:
                   description: Type of deployment (volto or classic)
                   type: string
