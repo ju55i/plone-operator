@@ -54,15 +54,30 @@ undeploy-sample:
 lint:
 	uv run ruff check plone_operator.py
 
+# Type-check Python code with ty
+.PHONY: typecheck
+typecheck:
+	uv run ty check plone_operator.py
+
 # Generate bundle
 .PHONY: bundle
 bundle:
 	@echo "Generating operator bundle..."
 
-# Build and load the operator image into a running minikube cluster
+# Build and load the operator image into a running minikube cluster.
+# Scales the operator to 0 and waits for all pods to terminate before
+# removing the old image (a running container holds the image reference and
+# prevents minikube from replacing the tag).
 .PHONY: minikube-load
 minikube-load: docker-build
+	kubectl scale deployment/plone-operator-controller-manager \
+		-n plone-operator-system --replicas=0 --ignore-not-found=true 2>/dev/null || true
+	kubectl wait --for=delete pod -n plone-operator-system \
+		-l control-plane=controller-manager --timeout=30s 2>/dev/null || true
+	minikube image rm docker.io/library/${IMG} 2>/dev/null || true
 	minikube image load ${IMG}
+	kubectl scale deployment/plone-operator-controller-manager \
+		-n plone-operator-system --replicas=1 --ignore-not-found=true 2>/dev/null || true
 
 # Full local minikube deployment: build image, load it, then deploy operator
 .PHONY: minikube-deploy

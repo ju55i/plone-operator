@@ -11,6 +11,7 @@ Manages the full lifecycle of a PloneSite custom resource:
 import asyncio
 import datetime
 import logging
+from typing import Any
 
 import aiohttp
 import kopf
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 # Startup: load kubeconfig (in-cluster or local for development)
 # ---------------------------------------------------------------------------
 
-@kopf.on.startup()
+@kopf.on.startup()  # ty: ignore[invalid-argument-type]
 def configure(settings: kopf.OperatorSettings, **_):
     """Load Kubernetes credentials and configure operator settings."""
     try:
@@ -35,7 +36,7 @@ def configure(settings: kopf.OperatorSettings, **_):
         logger.info("Loaded local kubeconfig (development mode)")
 
     # Kopf health-check endpoint (used by manager.yaml probes)
-    settings.peering.enabled = False
+    settings.peering.enabled = False  # ty: ignore[unresolved-attribute]
     settings.posting.enabled = True
     # Suppress Kopf's attempt to watch its own peering CRD (not installed)
     settings.watching.server_timeout = 270
@@ -54,19 +55,19 @@ def _namespace(meta):
     return meta["namespace"]
 
 
-def _labels(name: str) -> dict:
+def _labels(name: str) -> dict[str, str]:
     return {
         "app.kubernetes.io/managed-by": "plone-operator",
         "app.kubernetes.io/part-of": name,
     }
 
 
-def _make_env_list(env_dict: dict) -> list:
+def _make_env_list(env_dict: dict[str, Any]) -> list[dict[str, Any]]:
     """Convert a plain dict of env vars to a k8s env list."""
     return [{"name": k, "value": str(v)} for k, v in env_dict.items()]
 
 
-def _secret_env(var_name: str, secret_name: str, secret_key: str) -> dict:
+def _secret_env(var_name: str, secret_name: str, secret_key: str) -> dict[str, Any]:
     return {
         "name": var_name,
         "valueFrom": {
@@ -83,7 +84,7 @@ def _secret_env(var_name: str, secret_name: str, secret_key: str) -> dict:
 # Resource manifests
 # ---------------------------------------------------------------------------
 
-def build_zeo_pvc(name: str, namespace: str, spec: dict) -> dict:
+def build_zeo_pvc(name: str, namespace: str, spec: dict[str, Any]) -> dict[str, Any]:
     persistence = spec.get("persistence", {})
     storage_class = persistence.get("storageClass")
     size = persistence.get("size", "10Gi")
@@ -106,7 +107,7 @@ def build_zeo_pvc(name: str, namespace: str, spec: dict) -> dict:
     return manifest
 
 
-def build_zeo_statefulset(name: str, namespace: str, spec: dict) -> dict:
+def build_zeo_statefulset(name: str, namespace: str, spec: dict[str, Any]) -> dict[str, Any]:
     persistence = spec.get("persistence", {})
     persistence_enabled = persistence.get("enabled", True)
 
@@ -135,7 +136,7 @@ def build_zeo_statefulset(name: str, namespace: str, spec: dict) -> dict:
     if persistence_enabled:
         container["volumeMounts"] = [{"name": "zeo-data", "mountPath": "/data"}]
 
-    manifest = {
+    manifest: dict[str, Any] = {
         "apiVersion": "apps/v1",
         "kind": "StatefulSet",
         "metadata": {
@@ -155,7 +156,7 @@ def build_zeo_statefulset(name: str, namespace: str, spec: dict) -> dict:
     }
 
     if persistence_enabled:
-        manifest["spec"]["volumeClaimTemplates"] = [
+        manifest["spec"]["volumeClaimTemplates"] = [  # ty: ignore[invalid-assignment]
             {
                 "metadata": {"name": "zeo-data"},
                 "spec": {
@@ -169,7 +170,7 @@ def build_zeo_statefulset(name: str, namespace: str, spec: dict) -> dict:
     return manifest
 
 
-def build_zeo_service(name: str, namespace: str, spec: dict) -> dict:
+def build_zeo_service(name: str, namespace: str, spec: dict[str, Any]) -> dict[str, Any]:
     return {
         "apiVersion": "v1",
         "kind": "Service",
@@ -186,7 +187,7 @@ def build_zeo_service(name: str, namespace: str, spec: dict) -> dict:
     }
 
 
-def build_cnpg_cluster(name: str, namespace: str, spec: dict) -> dict:
+def build_cnpg_cluster(name: str, namespace: str, spec: dict[str, Any]) -> dict[str, Any]:
     """Build a CloudNativePG Cluster CR for in-cluster PostgreSQL."""
     persistence = spec.get("persistence", {})
     storage_class = persistence.get("storageClass")
@@ -222,10 +223,10 @@ def build_cnpg_cluster(name: str, namespace: str, spec: dict) -> dict:
 def build_backend_deployment(
     name: str,
     namespace: str,
-    spec: dict,
-    db_env: dict,
-    db_secret_envs: list | None = None,
-) -> dict:
+    spec: dict[str, Any],
+    db_env: dict[str, Any],
+    db_secret_envs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """
     Build the backend Deployment manifest.
 
@@ -318,7 +319,7 @@ def build_backend_deployment(
     }
 
 
-def build_backend_service(name: str, namespace: str) -> dict:
+def build_backend_service(name: str, namespace: str) -> dict[str, Any]:
     return {
         "apiVersion": "v1",
         "kind": "Service",
@@ -334,7 +335,7 @@ def build_backend_service(name: str, namespace: str) -> dict:
     }
 
 
-def build_frontend_deployment(name: str, namespace: str, spec: dict) -> dict:
+def build_frontend_deployment(name: str, namespace: str, spec: dict[str, Any]) -> dict[str, Any]:
     site_id = spec.get("siteId", "plone")
     vhm_url = spec.get("vhmUrl", "")
     frontend_image = spec.get("frontendImage", "plone/plone-frontend:latest")
@@ -397,7 +398,7 @@ def build_frontend_deployment(name: str, namespace: str, spec: dict) -> dict:
     }
 
 
-def build_frontend_service(name: str, namespace: str, spec: dict) -> dict:
+def build_frontend_service(name: str, namespace: str, spec: dict[str, Any]) -> dict[str, Any]:
     vhm_url = spec.get("vhmUrl", "")
     # Use NodePort when no vhmUrl so `minikube service` can provide an accessible
     # URL without requiring manual port-forwarding in local dev.
@@ -418,7 +419,7 @@ def build_frontend_service(name: str, namespace: str, spec: dict) -> dict:
     }
 
 
-def build_ingress(name: str, namespace: str, spec: dict) -> dict:
+def build_ingress(name: str, namespace: str, spec: dict[str, Any]) -> dict[str, Any]:
     vhm_url = spec.get("vhmUrl", "")
     ingress_cfg = spec.get("ingress", {})
     ingress_class = ingress_cfg.get("className", "")
@@ -471,14 +472,19 @@ def build_ingress(name: str, namespace: str, spec: dict) -> dict:
 # Apply helpers using kubernetes python client
 # ---------------------------------------------------------------------------
 
-def _apply_manifest(manifest: dict) -> None:
+def _apply_manifest(manifest: dict[str, Any]) -> None:
     """
     Apply a single manifest using server-side apply (SSA).
 
-    SSA uses a strategic merge with field ownership and force=True so that the
-    operator can reclaim fields it previously set.  This correctly handles cases
-    that merge-patch cannot (e.g. changing Service.spec.type, adding new env
-    vars to a Deployment, etc.).
+    SSA uses field ownership with force_conflicts=True so the operator can
+    reclaim fields previously owned by other managers (e.g. changing
+    Service.spec.type).
+
+    StatefulSet caveat: spec.selector, spec.serviceName, spec.podManagementPolicy,
+    and spec.volumeClaimTemplates are immutable after creation.  Kubernetes
+    rejects SSA attempts to take ownership of them even with force_conflicts,
+    so we strip those fields from the patch body.  They are only present in the
+    full manifest used for initial creation.
     """
     kind = manifest["kind"]
     name = manifest["metadata"]["name"]
@@ -492,12 +498,19 @@ def _apply_manifest(manifest: dict) -> None:
         api_version=manifest["apiVersion"], kind=kind
     )
 
-    # SSA requires a fieldManager and force=True so we own all fields we set.
-    kwargs = dict(
-        body=manifest,
+    # Strip immutable StatefulSet fields so SSA does not try to claim ownership
+    # of fields it can never legally change.
+    body = manifest
+    if kind == "StatefulSet":
+        spec = {k: v for k, v in manifest.get("spec", {}).items()
+                if k not in ("volumeClaimTemplates", "selector", "serviceName", "podManagementPolicy")}
+        body = {**manifest, "spec": spec}
+
+    kwargs: dict = dict(
+        body=body,
         name=name,
         field_manager="plone-operator",
-        force=True,
+        force_conflicts=True,
         content_type="application/apply-patch+yaml",
     )
     if namespace:
@@ -574,7 +587,7 @@ async def _wait_for_cnpg_service(name: str, namespace: str, timeout: int = 300) 
 
 @kopf.on.create("plone.org", "v1alpha1", "plonesites")
 @kopf.on.update("plone.org", "v1alpha1", "plonesites")
-@kopf.on.resume("plone.org", "v1alpha1", "plonesites")
+@kopf.on.resume("plone.org", "v1alpha1", "plonesites")  # ty: ignore[invalid-argument-type]
 async def reconcile(spec, meta, status, patch, logger, **kwargs):
     name = _name(meta)
     namespace = _namespace(meta)
@@ -587,7 +600,7 @@ async def reconcile(spec, meta, status, patch, logger, **kwargs):
         {
             "type": "Reconciling",
             "status": "True",
-            "lastTransitionTime": datetime.datetime.utcnow().isoformat() + "Z",
+            "lastTransitionTime": datetime.datetime.now(datetime.UTC).isoformat(),
             "reason": "ReconcileStarted",
             "message": "Operator is reconciling the PloneSite",
         }
@@ -708,7 +721,7 @@ async def reconcile(spec, meta, status, patch, logger, **kwargs):
         {
             "type": "Ready",
             "status": "True",
-            "lastTransitionTime": datetime.datetime.utcnow().isoformat() + "Z",
+            "lastTransitionTime": datetime.datetime.now(datetime.UTC).isoformat(),
             "reason": "ReconcileComplete",
             "message": "PloneSite is running",
         }
@@ -720,7 +733,7 @@ async def reconcile(spec, meta, status, patch, logger, **kwargs):
 # Delete handler
 # ---------------------------------------------------------------------------
 
-@kopf.on.delete("plone.org", "v1alpha1", "plonesites")
+@kopf.on.delete("plone.org", "v1alpha1", "plonesites")  # ty: ignore[invalid-argument-type]
 async def on_delete(meta, spec, logger, **kwargs):
     """
     Owner references (set by kopf.adopt) handle garbage collection of child
@@ -739,14 +752,14 @@ async def on_delete(meta, spec, logger, **kwargs):
 # Weekly database pack job
 # ---------------------------------------------------------------------------
 
-@kopf.timer("plone.org", "v1alpha1", "plonesites", interval=604800.0, idle=300.0)
+@kopf.timer("plone.org", "v1alpha1", "plonesites", interval=604800.0, idle=300.0)  # ty: ignore[invalid-argument-type]
 async def db_pack(spec, meta, logger, **kwargs):
     """Create a one-off Job to pack the database weekly."""
     name = _name(meta)
     namespace = _namespace(meta)
     db_type = spec.get("database", {}).get("type", "zodb")
 
-    ts = datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    ts = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d%H%M%S")
     job_name = f"{name}-pack-{ts}"
 
     backend_image = spec.get("image", "plone/plone-backend:latest")

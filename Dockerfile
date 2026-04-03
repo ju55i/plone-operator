@@ -18,4 +18,4 @@ COPY plone_operator.py .
 RUN useradd -u 1000 -m plone-operator
 USER 1000
 
-ENTRYPOINT ["uv", "run", "--frozen", "kopf", "run", "--all-namespaces", "--liveness=http://0.0.0.0:8080/healthz", "plone_operator.py"]
+ENTRYPOINT ["uv", "run", "--frozen", "--no-dev", "kopf", "run", "--all-namespaces", "--liveness=http://0.0.0.0:8080/healthz", "plone_operator.py"]
