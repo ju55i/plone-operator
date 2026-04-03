@@ -21,14 +21,16 @@ spec:
   # Number of replicas
   replicas: 2
   
-  # VHM for external access
+  # VHM: the public URL Plone should use when generating links.
+  # The operator builds the Traefik Middleware that rewrites incoming paths to:
+  #   /VirtualHostBase/https/classic.example.com/Plone/VirtualHostRoot/<path>
   vhmUrl: "https://classic.example.com"
   vhmPath: "Plone"
   
   # Ingress configuration
   ingress:
     enabled: true
-    className: "nginx"
+    className: "traefik"
     tls: true
   
   # Use PostgreSQL with RelStorage

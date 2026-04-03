@@ -31,8 +31,15 @@ spec:
   # Without vhmUrl, the frontend Service is NodePort so you can access it via:
   #   minikube service simple-plone-frontend
   #
-  # For port-forward dev access with full seamless mode proxying, set vhmUrl and run:
-  #   kubectl port-forward svc/simple-plone-frontend 3000:3000
-  # Then browse to http://localhost:3000
+  # For production with Traefik Ingress, set vhmUrl + ingress.enabled.
+  # The operator will:
+  #   - Set RAZZLE_API_PATH on the Volto frontend to the public URL
+  #   - Set CORS_ALLOW_ORIGIN on the backend
+  #   - Create a Traefik Ingress routing <host> → frontend service
   #
-  # vhmUrl: "http://localhost:3000"
+  # nip.io resolves *.192.168.49.2.nip.io to 192.168.49.2 (minikube IP);
+  # Traefik NodePort 30121 is HTTP.
+  vhmUrl: "http://simple-plone.192.168.49.2.nip.io:30121"
+  ingress:
+    enabled: true
+    className: "traefik"

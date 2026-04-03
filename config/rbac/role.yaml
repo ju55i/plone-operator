@@ -103,3 +103,16 @@ rules:
       - patch
       - update
       - watch
+  # Permissions for managing Traefik Middleware resources
+  - apiGroups:
+      - traefik.io
+    resources:
+      - middlewares
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch

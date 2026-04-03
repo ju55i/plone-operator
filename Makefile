@@ -64,21 +64,15 @@ typecheck:
 bundle:
 	@echo "Generating operator bundle..."
 
-# Build and load the operator image into a running minikube cluster.
-# Scales the operator to 0 and waits for all pods to terminate before
-# removing the old image (a running container holds the image reference and
-# prevents minikube from replacing the tag).
+# Build the operator image directly inside minikube's Docker daemon so that
+# the new :latest tag is immediately available to the kubelet without any
+# image-load step.  A rollout restart is then enough to pick up the new image.
 .PHONY: minikube-load
-minikube-load: docker-build
-	kubectl scale deployment/plone-operator-controller-manager \
-		-n plone-operator-system --replicas=0 --ignore-not-found=true 2>/dev/null || true
-	kubectl wait --for=delete pod -n plone-operator-system \
-		-l control-plane=controller-manager --timeout=30s 2>/dev/null || true
-	minikube image rm docker.io/library/${IMG} 2>/dev/null || true
-	minikube image load ${IMG}
-	kubectl scale deployment/plone-operator-controller-manager \
-		-n plone-operator-system --replicas=1 --ignore-not-found=true 2>/dev/null || true
+minikube-load:
+	eval $$(minikube docker-env) && docker build -t ${IMG} .
+	kubectl rollout restart deployment/plone-operator-controller-manager \
+		-n plone-operator-system --ignore-not-found=true 2>/dev/null || true
 
-# Full local minikube deployment: build image, load it, then deploy operator
+# Full local minikube deployment: build image inside minikube then deploy operator manifests
 .PHONY: minikube-deploy
 minikube-deploy: minikube-load deploy

@@ -21,14 +21,15 @@ spec:
   # High availability setup
   replicas: 3
   
-  # Virtual Host Monster for production
+  # Virtual Host Monster: the public URL Plone uses when generating links.
+  # RAZZLE_API_PATH for the Volto frontend is also set to this URL.
   vhmUrl: "https://www.example.com"
   vhmPath: "Plone"
   
   # Ingress with TLS
   ingress:
     enabled: true
-    className: "nginx"
+    className: "traefik"
     tls: true
   
   # Production resources
