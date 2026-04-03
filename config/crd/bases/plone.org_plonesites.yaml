@@ -48,10 +48,6 @@ spec:
                   enum:
                     - volto
                     - classic
-                adminPasswordSecret:
-                  description: Secret name containing the admin password
-                  type: string
-                  default: "plone-admin-password"
                 image:
                   description: Plone backend container image
                   type: string

@@ -11,10 +11,9 @@ spec:
   # Use Classic UI (traditional Plone interface)
   deploymentType: "classic"
 
-  # Name of the Kubernetes Secret containing admin credentials.
-  # kubectl create secret generic plone-admin-secret \
+  # Admin credentials are read from a Secret named "<cr-name>-admin".
+  # kubectl create secret generic plone-classic-admin \
   #   --from-literal=username=admin --from-literal=password=changeme
-  adminPasswordSecret: "plone-admin-secret"
 
   # Backend image
   image: "plone/plone-backend:6.0"

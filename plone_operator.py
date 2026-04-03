@@ -279,7 +279,7 @@ def build_backend_deployment(
                     so that k8s variable substitution works for values like $(DB_PASSWORD))
     """
     site_id = spec.get("siteId", "plone")
-    admin_password_secret = spec.get("adminPasswordSecret", "plone-admin-password")
+    admin_password_secret = f"{name}-admin"
     backend_image = spec.get("image", "plone/plone-backend:latest")
     replicas = spec.get("replicas", 1)
     resources = spec.get("resources", {})

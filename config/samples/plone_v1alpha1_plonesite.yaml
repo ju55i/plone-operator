@@ -11,10 +11,9 @@ spec:
   # Deployment type: 'volto' (frontend+backend) or 'classic' (backend-only)
   deploymentType: "volto"
 
-  # Name of the Kubernetes Secret containing admin credentials.
-  # kubectl create secret generic plone-admin-secret \
+  # Admin credentials are read from a Secret named "<cr-name>-admin".
+  # kubectl create secret generic my-plone-site-admin \
   #   --from-literal=username=admin --from-literal=password=changeme
-  adminPasswordSecret: "plone-admin-secret"
 
   # Plone backend image
   image: "plone/plone-backend:6.0"
