@@ -9,6 +9,7 @@ Manages the full lifecycle of a PloneSite custom resource:
 """
 
 import asyncio
+import base64
 import datetime
 import logging
 from typing import Any
@@ -686,6 +687,83 @@ async def _wait_for_plone(backend_svc: str, namespace: str, site_id: str, timeou
 
 
 # ---------------------------------------------------------------------------
+# Plone DB upgrade via REST API
+# ---------------------------------------------------------------------------
+
+async def _run_plone_upgrade(
+    backend_svc: str,
+    namespace: str,
+    site_id: str,
+    admin_secret_name: str,
+    timeout: int = 300,
+) -> bool:
+    """Check for pending Plone DB migration steps and run them via the REST API.
+
+    Calls ``GET /{site_id}/@upgrade`` to detect pending steps, then
+    ``POST /{site_id}/@upgrade`` to execute them if needed.  Both calls use
+    HTTP Basic auth with the credentials from the admin Secret.
+
+    Returns True if an upgrade was performed, False if the site was already
+    up to date.  Raises ``kopf.TemporaryError`` on unexpected HTTP responses.
+    """
+    core_v1 = k8s_client.CoreV1Api()
+    secret = core_v1.read_namespaced_secret(admin_secret_name, namespace)
+    username = base64.b64decode(secret.data["username"]).decode()
+    password = base64.b64decode(secret.data["password"]).decode()
+
+    upgrade_url = (
+        f"http://{backend_svc}.{namespace}.svc.cluster.local:8080/{site_id}/@upgrade"
+    )
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    auth = aiohttp.BasicAuth(username, password)
+
+    async with aiohttp.ClientSession(auth=auth, headers=headers) as session:
+        # --- Check whether an upgrade is needed ---
+        async with session.get(
+            upgrade_url, timeout=aiohttp.ClientTimeout(total=30)
+        ) as resp:
+            if resp.status != 200:
+                text = await resp.text()
+                raise kopf.TemporaryError(
+                    f"GET @upgrade returned HTTP {resp.status}: {text[:200]}", delay=30
+                )
+            data = await resp.json()
+
+        if not data.get("needs_upgrading", False):
+            logger.info("Plone site %s/%s is already up to date", namespace, site_id)
+            return False
+
+        step_count = len(data.get("upgrades", []))
+        logger.info(
+            "Plone site %s/%s needs upgrading (%d step(s)), running migration...",
+            namespace,
+            site_id,
+            step_count,
+        )
+
+        # --- Run the upgrade ---
+        async with session.post(
+            upgrade_url,
+            json={},
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        ) as resp:
+            if resp.status not in (200, 204):
+                text = await resp.text()
+                raise kopf.TemporaryError(
+                    f"POST @upgrade returned HTTP {resp.status}: {text[:200]}", delay=30
+                )
+            result = await resp.json()
+
+    logger.info(
+        "Plone DB upgrade complete for %s/%s: %s",
+        namespace,
+        site_id,
+        result.get("message", "done"),
+    )
+    return True
+
+
+# ---------------------------------------------------------------------------
 # CNPG readiness: wait for the cluster service AND app secret to exist
 # ---------------------------------------------------------------------------
 
@@ -877,6 +955,15 @@ async def reconcile(spec, meta, status, patch, logger, **kwargs):
     site_id = spec.get("siteId", "plone")
     backend_svc_name = f"{name}-backend"
     await _wait_for_plone(backend_svc_name, namespace, site_id)
+
+    # -------------------------------------------------------------------
+    # Run Plone DB upgrade if needed (idempotent: GET first, POST only if
+    # needs_upgrading is True).  Uses the admin Secret for Basic auth.
+    # -------------------------------------------------------------------
+    admin_secret_name = f"{name}-admin"
+    upgraded = await _run_plone_upgrade(backend_svc_name, namespace, site_id, admin_secret_name)
+    if upgraded:
+        patch.status["lastUpgradeTime"] = datetime.datetime.now(datetime.UTC).isoformat()
 
     # -------------------------------------------------------------------
     # Determine site URL for status

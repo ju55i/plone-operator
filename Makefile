@@ -1,8 +1,11 @@
 # Plone Operator Makefile
-# Image URL to use all building/pushing image targets
-IMG ?= plone-operator:latest
-# Operator-SDK version
-OPERATOR_SDK_VERSION ?= v1.32.0
+# Image name (without tag)
+IMG_NAME ?= plone-operator
+# Version derived from the nearest git tag, or the short commit SHA as a
+# fallback when no tags exist yet.  Override with: make VERSION=0.2.0 ...
+VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || git rev-parse --short HEAD)
+# Full image reference used by all build/push/deploy targets.
+IMG ?= $(IMG_NAME):$(VERSION)
 # Namespace where PloneSite CRs and their resources live
 PLONE_NS ?= plone
 
@@ -16,14 +19,17 @@ docker-build:
 docker-push:
 	docker push ${IMG}
 
-# Deploy the operator to the K8s cluster
+# Deploy the operator to the K8s cluster.
+# manager.yaml carries plone-operator:latest as a default placeholder; this
+# target substitutes the actual versioned IMG before applying so the running
+# Deployment always references the exact image that was built.
 .PHONY: deploy
 deploy:
 	kubectl apply -f config/manager/namespace.yaml
 	kubectl apply -f config/manager/plone-namespace.yaml
 	kubectl apply -f config/crd/bases/
 	kubectl apply -f config/rbac/
-	kubectl apply -f config/manager/
+	sed 's|plone-operator:latest|$(IMG)|g' config/manager/manager.yaml | kubectl apply -f -
 
 # Undeploy the operator from the K8s cluster
 .PHONY: undeploy
@@ -89,14 +95,19 @@ bundle:
 	@echo "Generating operator bundle..."
 
 # Build the operator image directly inside minikube's Docker daemon so that
-# the new :latest tag is immediately available to the kubelet without any
-# image-load step.  A rollout restart is then enough to pick up the new image.
+# the versioned tag is immediately available to the kubelet without a registry
+# push or image-load step.  Patches the running Deployment to the new tag so
+# the change takes effect immediately.  Use minikube-deploy for fresh clusters.
 .PHONY: minikube-load
 minikube-load:
-	eval $$(minikube docker-env) && docker build -t ${IMG} .
-	kubectl rollout restart deployment/plone-operator-controller-manager \
-		-n plone-operator-system 2>/dev/null || true
+	eval $$(minikube docker-env) && docker build -t $(IMG) .
+	kubectl set image deployment/plone-operator-controller-manager \
+		manager=$(IMG) -n plone-operator-system
 
-# Full local minikube deployment: build image inside minikube then deploy operator manifests
+# Full local minikube deployment for fresh clusters: build image inside
+# minikube's Docker daemon first so the image is available before the
+# Deployment is applied, then deploy all manifests with the correct tag.
 .PHONY: minikube-deploy
-minikube-deploy: minikube-load deploy
+minikube-deploy:
+	eval $$(minikube docker-env) && docker build -t $(IMG) .
+	$(MAKE) deploy

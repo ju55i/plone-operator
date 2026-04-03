@@ -1,0 +1,36 @@
+apiVersion: plone.org/v1alpha1
+kind: PloneSite
+metadata:
+  name: plone61
+  namespace: plone
+spec:
+  # Plone 6.1 test — Volto frontend + ZEO backend
+  siteId: "Plone"
+
+  # Use Plone 6.1 backend image (6.1.4 as of 2026-01-15)
+  image: "plone/plone-backend:6.1"
+
+  # Plone 6.1 ships with Volto 18.x
+  frontendImage: "plone/plone-frontend:18"
+
+  deploymentType: "volto"
+
+  # Admin credentials are read from a Secret named "plone61-admin".
+  # kubectl create secret generic plone61-admin -n plone \
+  #   --from-literal=username=admin --from-literal=password=changeme
+
+  replicas: 1
+
+  database:
+    type: "zodb"
+
+  persistence:
+    enabled: true
+    size: "5Gi"
+
+  # QEMU driver: use kubectl port-forward svc/traefik 8080:80 -n kube-system
+  # 127.0.0.1.nip.io resolves to 127.0.0.1 (loopback)
+  publicUrl: "http://plone61.127.0.0.1.nip.io:8080"
+  ingress:
+    enabled: true
+    className: "traefik"

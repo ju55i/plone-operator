@@ -110,13 +110,13 @@ spec:
                   description: Database configuration
                   type: object
                   properties:
-                     type:
-                       description: Database type (zodb or postgresql)
-                       type: string
-                       default: "zodb"
-                       enum:
-                         - zodb
-                         - postgresql
+                    type:
+                      description: Database type (zodb or postgresql)
+                      type: string
+                      default: "zodb"
+                      enum:
+                        - zodb
+                        - postgresql
                     cnpg:
                       description: >
                         Use CloudNativePG for in-cluster PostgreSQL.
@@ -129,17 +129,17 @@ spec:
                       type: boolean
                       default: false
                     credentialsSecret:
-                       description: >
-                         Name of the Secret that holds database credentials.
-                         Required for type=postgresql with cnpg: false (external
-                         PostgreSQL).  The Secret must contain: host,
-                         port (optional, default 5432), dbname (optional,
-                         default plone), username, password.
+                      description: >
+                        Name of the Secret that holds database credentials.
+                        Required for type=postgresql with cnpg: false (external
+                        PostgreSQL).  The Secret must contain: host,
+                        port (optional, default 5432), dbname (optional,
+                        default plone), username, password.
 
-                         Not used when cnpg: true — CloudNativePG auto-generates
-                         credentials and writes the runtime connection details to
-                         the <name>-db-app Secret automatically.
-                       type: string
+                        Not used when cnpg: true — CloudNativePG auto-generates
+                        credentials and writes the runtime connection details to
+                        the <name>-db-app Secret automatically.
+                      type: string
                     packIntervalDays:
                       description: >
                         How often to pack the database (days).
@@ -208,6 +208,10 @@ spec:
                   type: string
                 lastPackTime:
                   description: ISO-8601 timestamp of the last successful db_pack job creation
+                  type: string
+                  format: date-time
+                lastUpgradeTime:
+                  description: ISO-8601 timestamp of the last automatic Plone DB upgrade
                   type: string
                   format: date-time
       subresources:
