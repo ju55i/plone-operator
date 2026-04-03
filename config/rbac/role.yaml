@@ -116,3 +116,16 @@ rules:
       - patch
       - update
       - watch
+  # Kopf leadership election and change-watching coordination
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch

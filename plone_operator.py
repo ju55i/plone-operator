@@ -729,11 +729,28 @@ async def _run_plone_upgrade(
                 )
             data = await resp.json()
 
-        if not data.get("needs_upgrading", False):
+        # The REST API response shape changed between Plone versions:
+        #   Plone 6.0-era:  {"needs_upgrading": bool, "upgrades": [...]}
+        #   Plone 6.1-era:  {"versions": {"fs": "6111", "instance": "6026"},
+        #                    "upgrade_steps": {"6026-6027": [...], ...}}
+        # Support both shapes.
+        versions = data.get("versions", {})
+        fs_version = versions.get("fs")
+        instance_version = versions.get("instance")
+        if fs_version and instance_version:
+            # New-style response
+            needs_upgrading = fs_version != instance_version
+            upgrade_steps: dict[str, Any] = data.get("upgrade_steps", {})
+            step_count = sum(len(v) for v in upgrade_steps.values())
+        else:
+            # Old-style response
+            needs_upgrading = data.get("needs_upgrading", False)
+            step_count = len(data.get("upgrades", []))
+
+        if not needs_upgrading:
             logger.info("Plone site %s/%s is already up to date", namespace, site_id)
             return False
 
-        step_count = len(data.get("upgrades", []))
         logger.info(
             "Plone site %s/%s needs upgrading (%d step(s)), running migration...",
             namespace,
