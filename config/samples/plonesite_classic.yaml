@@ -2,6 +2,7 @@ apiVersion: plone.org/v1alpha1
 kind: PloneSite
 metadata:
   name: plone-classic
+  namespace: plone
 spec:
   # Classic Plone deployment (no Volto frontend)
   siteName: "Plone Classic"

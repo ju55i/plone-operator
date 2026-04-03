@@ -4,7 +4,6 @@ metadata:
   name: pg-plone
   namespace: plone
 spec:
-  siteName: "Plone with PostgreSQL"
   siteId: "Plone"
 
   # Use Volto frontend

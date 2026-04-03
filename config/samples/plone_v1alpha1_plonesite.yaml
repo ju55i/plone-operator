@@ -2,9 +2,9 @@ apiVersion: plone.org/v1alpha1
 kind: PloneSite
 metadata:
   name: my-plone-site
+  namespace: plone
 spec:
   # Site configuration
-  siteName: "My Plone Site"
   siteId: "plone"
 
   # Deployment type: 'volto' (frontend+backend) or 'classic' (backend-only)

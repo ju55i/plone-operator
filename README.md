@@ -98,7 +98,6 @@ metadata:
   name: my-plone
   namespace: plone
 spec:
-  siteName: "My Plone Site"
   siteId: "Plone"
   deploymentType: "volto"
   database:
@@ -124,7 +123,6 @@ metadata:
   name: production-plone
   namespace: plone
 spec:
-  siteName: "Production Plone"
   siteId: "Plone"
   deploymentType: "volto"
   image: "plone/plone-backend:6.0"
@@ -169,7 +167,6 @@ metadata:
   name: classic-plone
   namespace: plone
 spec:
-  siteName: "Classic Plone"
   siteId: "Plone"
   deploymentType: "classic"
   publicUrl: "https://classic.example.com"
@@ -190,7 +187,6 @@ spec:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `siteName` | string | `"Plone"` | Display name of the Plone site |
 | `siteId` | string | `"plone"` | URL path component (e.g. `/Plone`) |
 | `deploymentType` | string | `"volto"` | `volto` or `classic` |
 | `image` | string | `plone/plone-backend:latest` | Backend container image |

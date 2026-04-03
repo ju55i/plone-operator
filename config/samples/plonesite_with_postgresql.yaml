@@ -2,9 +2,9 @@ apiVersion: plone.org/v1alpha1
 kind: PloneSite
 metadata:
   name: plone-with-postgresql
+  namespace: plone
 spec:
   # Site configuration
-  siteName: "Plone with PostgreSQL"
   siteId: "Plone"
 
   # Use Volto frontend

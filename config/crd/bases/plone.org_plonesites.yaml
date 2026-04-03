@@ -33,10 +33,6 @@ spec:
               description: Spec defines the desired state of PloneSite
               type: object
               properties:
-                siteName:
-                  description: Name of the Plone site to create
-                  type: string
-                  default: "Plone"
                 siteId:
                   description: ID of the Plone site (URL path component)
                   type: string
