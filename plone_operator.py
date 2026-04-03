@@ -496,34 +496,61 @@ def build_traefik_vhm_middleware(name: str, namespace: str, spec: dict[str, Any]
 
 
 def build_ingress(name: str, namespace: str, spec: dict[str, Any]) -> dict[str, Any]:
+    """
+    Build the Ingress for this PloneSite.
+
+    Classic UI
+        Single path ``/`` → backend:8080.  The VHM Middleware annotation is
+        attached so Traefik rewrites every request path to the Zope
+        VirtualHostMonster traversal URL before proxying.
+
+    Volto
+        Two paths in one Ingress (pathType Prefix, most-specific wins):
+
+        * ``/++api++`` → backend:8080  — REST API requests go straight to Zope.
+          No VHM middleware annotation; Traefik passes ``X-Forwarded-Host`` /
+          ``X-Forwarded-Proto`` headers that Zope uses to generate correct
+          public URLs.
+        * ``/``        → frontend:3000 — everything else goes to the Volto
+          React frontend.
+    """
+    from urllib.parse import urlparse
+
     vhm_url = spec.get("vhmUrl", "")
     ingress_cfg = spec.get("ingress", {})
     ingress_class = ingress_cfg.get("className", "traefik")
     tls_enabled = ingress_cfg.get("tls", False)
     deployment_type = spec.get("deploymentType", "volto")
-
-    # Extract hostname from public URL (strip scheme and trailing slash).
-    from urllib.parse import urlparse
     host = urlparse(vhm_url.rstrip("/")).hostname or ""
 
     if deployment_type == "volto":
-        # Volto: Ingress routes to the frontend; Node.js SSR proxies /++api++/
-        # to the backend internally.  No VHM rewrite needed on the Ingress.
-        backend_port = 3000
-        backend_svc_name = f"{name}-frontend"
+        paths = [
+            {
+                "path": "/++api++",
+                "pathType": "Prefix",
+                "backend": {"service": {"name": f"{name}-backend", "port": {"number": 8080}}},
+            },
+            {
+                "path": "/",
+                "pathType": "Prefix",
+                "backend": {"service": {"name": f"{name}-frontend", "port": {"number": 3000}}},
+            },
+        ]
         annotations: dict[str, str] = {}
     else:
-        # Classic UI: Ingress routes directly to Zope.  The Traefik Middleware
-        # <name>-vhm (built by build_traefik_vhm_middleware) rewrites the path
-        # to the VirtualHostMonster traversal URL before proxying.
-        backend_port = 8080
-        backend_svc_name = f"{name}-backend"
+        paths = [
+            {
+                "path": "/",
+                "pathType": "Prefix",
+                "backend": {"service": {"name": f"{name}-backend", "port": {"number": 8080}}},
+            },
+        ]
         # Middleware reference format: <namespace>-<middleware-name>@kubernetescrd
         annotations = {
             "traefik.ingress.kubernetes.io/router.middlewares": f"{namespace}-{name}-vhm@kubernetescrd",
         }
 
-    manifest = {
+    manifest: dict[str, Any] = {
         "apiVersion": "networking.k8s.io/v1",
         "kind": "Ingress",
         "metadata": {
@@ -533,25 +560,7 @@ def build_ingress(name: str, namespace: str, spec: dict[str, Any]) -> dict[str, 
             "annotations": annotations,
         },
         "spec": {
-            "rules": [
-                {
-                    "host": host,
-                    "http": {
-                        "paths": [
-                            {
-                                "path": "/",
-                                "pathType": "Prefix",
-                                "backend": {
-                                    "service": {
-                                        "name": backend_svc_name,
-                                        "port": {"number": backend_port},
-                                    }
-                                },
-                            }
-                        ]
-                    },
-                }
-            ]
+            "rules": [{"host": host, "http": {"paths": paths}}],
         },
     }
     if ingress_class:
@@ -777,8 +786,8 @@ async def reconcile(spec, meta, status, patch, logger, **kwargs):
         ingress = build_ingress(name, namespace, spec)
         kopf.adopt(ingress)
         manifests.append(ingress)
-        # Classic UI: add the Traefik Middleware that rewrites paths for VHM.
-        # (Volto routes to the frontend; no VHM rewrite needed on the Ingress.)
+        # Classic UI only: Traefik Middleware that rewrites paths for VHM.
+        # Volto uses X-Forwarded-Host/Proto headers for backend URL generation.
         if deployment_type != "volto":
             vhm_middleware = build_traefik_vhm_middleware(name, namespace, spec)
             kopf.adopt(vhm_middleware)

@@ -71,7 +71,7 @@ bundle:
 minikube-load:
 	eval $$(minikube docker-env) && docker build -t ${IMG} .
 	kubectl rollout restart deployment/plone-operator-controller-manager \
-		-n plone-operator-system --ignore-not-found=true 2>/dev/null || true
+		-n plone-operator-system 2>/dev/null || true
 
 # Full local minikube deployment: build image inside minikube then deploy operator manifests
 .PHONY: minikube-deploy
