@@ -462,15 +462,21 @@ def build_traefik_middleware(name: str, namespace: str, spec: dict[str, Any]) ->
     Build a Traefik Middleware manifest that rewrites request paths for
     Zope's VirtualHostMonster.
 
-    Only used for Classic UI deployments where the Ingress routes directly
-    to the Zope backend.  Traefik applies this middleware before proxying,
-    transforming e.g.::
+    Used for both Classic UI and Volto deployments.  The VHM rewrite ensures
+    Plone generates public URLs without the Plone site object ID in the path.
 
-        GET /news  →  GET /VirtualHostBase/https/example.com/Plone/VirtualHostRoot/news
+    Classic UI
+        Rewrites every request path::
 
-    This is equivalent to the nginx proxy_pass pattern::
+            GET /news  →  GET /VirtualHostBase/https/example.com/Plone/VirtualHostRoot/news
 
-        proxy_pass http://backend:8080/VirtualHostBase/https/example.com/Plone/VirtualHostRoot/;
+    Volto
+        Rewrites only ``/++api++`` paths (other paths go to the React frontend
+        and must not be rewritten).  ``replacePathRegex`` is a no-op when the
+        regex does not match, so the ``/`` → frontend route is unaffected::
+
+            GET /++api++/@config
+              →  GET /VirtualHostBase/https/example.com/Plone/VirtualHostRoot/++api++/@config
 
     Traefik v3 uses ``traefik.io/v1alpha1``; Traefik v2 uses
     ``traefik.containo.us/v1alpha1`` — adjust ``apiVersion`` if needed.
@@ -478,7 +484,17 @@ def build_traefik_middleware(name: str, namespace: str, spec: dict[str, Any]) ->
     public_url = spec.get("publicUrl", "")
     site_id = spec.get("siteId", "plone")
     site_path = spec.get("sitePath", site_id)
+    deployment_type = spec.get("deploymentType", "volto")
     rewrite_base = _classic_rewrite_path(public_url, site_path)
+
+    if deployment_type == "volto":
+        # Only rewrite /++api++/* paths; everything else passes through unchanged.
+        regex = r"^/\+\+api\+\+(.*)"
+        replacement = f"{rewrite_base}/++api++$1"
+    else:
+        # Classic UI: rewrite all paths.
+        regex = "^/(.*)"
+        replacement = f"{rewrite_base}/$1"
 
     return {
         "apiVersion": "traefik.io/v1alpha1",
@@ -490,11 +506,8 @@ def build_traefik_middleware(name: str, namespace: str, spec: dict[str, Any]) ->
         },
         "spec": {
             "replacePathRegex": {
-                # Capture everything after the leading slash and prepend the
-                # full VHM traversal prefix.  An empty path (bare "/") maps
-                # to the VirtualHostRoot itself, which Zope handles correctly.
-                "regex": "^/(.*)",
-                "replacement": f"{rewrite_base}/$1",
+                "regex": regex,
+                "replacement": replacement,
             }
         },
     }
@@ -541,7 +554,11 @@ def build_ingress(name: str, namespace: str, spec: dict[str, Any]) -> dict[str, 
                 "backend": {"service": {"name": f"{name}-frontend", "port": {"number": 3000}}},
             },
         ]
-        annotations: dict[str, str] = {}
+        # VHM middleware rewrites /++api++/* paths before they reach the backend;
+        # its regex does not match "/" so the frontend route is unaffected.
+        annotations = {
+            "traefik.ingress.kubernetes.io/router.middlewares": f"{namespace}-{name}-rewrite@kubernetescrd",
+        }
     else:
         paths = [
             {
@@ -587,11 +604,12 @@ def _apply_manifest(manifest: dict[str, Any]) -> None:
     reclaim fields previously owned by other managers (e.g. changing
     Service.spec.type).
 
-    StatefulSet caveat: spec.selector, spec.serviceName, spec.podManagementPolicy,
-    and spec.volumeClaimTemplates are immutable after creation.  Kubernetes
-    rejects SSA attempts to take ownership of them even with force_conflicts,
-    so we strip those fields from the patch body.  They are only present in the
-    full manifest used for initial creation.
+    StatefulSet note: immutable fields (selector, serviceName,
+    volumeClaimTemplates, podManagementPolicy) are included in every SSA
+    patch unchanged.  Kubernetes validates the patch body for required-field
+    consistency, so omitting them causes a 422.  With force_conflicts=True
+    and unchanged values Kubernetes accepts them; it only rejects if the
+    value differs from what is already stored.
     """
     kind = manifest["kind"]
     name = manifest["metadata"]["name"]
@@ -605,13 +623,14 @@ def _apply_manifest(manifest: dict[str, Any]) -> None:
         api_version=manifest["apiVersion"], kind=kind
     )
 
-    # Strip immutable StatefulSet fields so SSA does not try to claim ownership
-    # of fields it can never legally change.
+    # SSA note for StatefulSets: immutable fields (selector, serviceName,
+    # volumeClaimTemplates, podManagementPolicy) must be included in every
+    # patch with their original values.  Kubernetes validates the patch body
+    # for required-field consistency, so stripping them causes a 422 even on
+    # updates.  With force_conflicts=True and unchanged values Kubernetes
+    # accepts them fine — it only rejects if the value differs from what is
+    # already stored.
     body = manifest
-    if kind == "StatefulSet":
-        spec = {k: v for k, v in manifest.get("spec", {}).items()
-                if k not in ("volumeClaimTemplates", "selector", "serviceName", "podManagementPolicy")}
-        body = {**manifest, "spec": spec}
 
     kwargs: dict = dict(
         body=body,
@@ -796,7 +815,8 @@ async def reconcile(spec, meta, status, patch, logger, **kwargs):
         manifests += [frontend_deploy, frontend_svc]
 
     # -------------------------------------------------------------------
-    # Ingress + Traefik Classic Middleware (when publicUrl is set and ingress.enabled)
+    # Ingress + Traefik VHM Middleware (when publicUrl is set and ingress.enabled)
+    # Classic: rewrites all paths; Volto: rewrites only /++api++/* paths.
     # -------------------------------------------------------------------
     public_url = spec.get("publicUrl", "")
     ingress_enabled = spec.get("ingress", {}).get("enabled", False)
@@ -804,12 +824,9 @@ async def reconcile(spec, meta, status, patch, logger, **kwargs):
         ingress = build_ingress(name, namespace, spec)
         kopf.adopt(ingress)
         manifests.append(ingress)
-        # Classic UI only: Traefik Middleware that rewrites paths for VHM.
-        # Volto uses X-Forwarded-Host/Proto headers for backend URL generation.
-        if deployment_type != "volto":
-            rewrite_middleware = build_traefik_middleware(name, namespace, spec)
-            kopf.adopt(rewrite_middleware)
-            manifests.append(rewrite_middleware)
+        rewrite_middleware = build_traefik_middleware(name, namespace, spec)
+        kopf.adopt(rewrite_middleware)
+        manifests.append(rewrite_middleware)
 
     # -------------------------------------------------------------------
     # Apply all manifests (skipping CNPG which was already applied above)
