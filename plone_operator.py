@@ -223,13 +223,15 @@ def build_zeo_service(name: str, namespace: str, spec: dict[str, Any]) -> dict[s
 def build_cnpg_cluster(name: str, namespace: str, spec: dict[str, Any]) -> dict[str, Any]:
     """Build a CloudNativePG Cluster CR for in-cluster PostgreSQL.
 
-    The bootstrap secret (database.credentialsSecret) must have ``username``
-    and ``password`` keys.  CNPG creates the app user from those values and
-    auto-creates a ``<name>-db-app`` Secret with full connection details
-    (host, port, dbname, username, password) that the operator uses at runtime.
+    CNPG auto-generates the application user credentials and writes them to a
+    Secret named ``<name>-db-app`` with keys: host, port, dbname, username,
+    password, uri, jdbc-uri, pgpass.  The operator reads that secret at runtime.
+
+    Note: ``database.credentialsSecret`` in the PloneSite spec is intentionally
+    NOT passed to CNPG bootstrap.  Passing an ``initdb.secret`` suppresses
+    CNPG's automatic creation of the ``<name>-db-app`` Secret.  For external
+    PostgreSQL (cnpg: false) the credentialsSecret is used directly.
     """
-    db_cfg = spec.get("database", {})
-    creds_secret = db_cfg.get("credentialsSecret", "plonedb-credentials")
     persistence = spec.get("persistence", {})
     storage_class = persistence.get("storageClass")
     size = persistence.get("size", "10Gi")
@@ -244,7 +246,6 @@ def build_cnpg_cluster(name: str, namespace: str, spec: dict[str, Any]) -> dict[
             "initdb": {
                 "database": "plone",
                 "owner": "plone",
-                "secret": {"name": creds_secret},
             }
         },
     }
@@ -679,31 +680,59 @@ async def _wait_for_plone(backend_svc: str, namespace: str, site_id: str, timeou
 
 
 # ---------------------------------------------------------------------------
-# CNPG readiness: wait for the CNPG cluster service to exist
+# CNPG readiness: wait for the cluster service AND app secret to exist
 # ---------------------------------------------------------------------------
 
-async def _wait_for_cnpg_service(name: str, namespace: str, timeout: int = 300) -> str:
-    """
-    Wait until the CNPG-managed Service (name-db-rw) appears, then return its hostname.
+async def _wait_for_cnpg_ready(name: str, namespace: str, timeout: int = 300) -> None:
+    """Wait until CNPG has fully bootstrapped.
+
+    Specifically waits for both:
+    - The read-write Service ``<name>-db-rw`` (created early by CNPG)
+    - The app credentials Secret ``<name>-db-app`` (created after bootstrap
+      completes; CNPG only writes this when no ``initdb.secret`` is provided)
+
+    The Service can appear minutes before the Secret, so checking only the
+    Service is not sufficient.
     """
     svc_name = f"{name}-db-rw"
+    secret_name = f"{name}-db-app"
     core_v1 = k8s_client.CoreV1Api()
     deadline = asyncio.get_event_loop().time() + timeout
 
-    while asyncio.get_event_loop().time() < deadline:
-        try:
-            core_v1.read_namespaced_service(svc_name, namespace)
-            logger.info("CNPG service %s/%s is ready", namespace, svc_name)
-            return svc_name
-        except ApiException as e:
-            if e.status == 404:
-                logger.debug("CNPG service %s not ready yet, waiting...", svc_name)
-                await asyncio.sleep(10)
-            else:
-                raise
+    svc_ready = False
+    secret_ready = False
 
+    while asyncio.get_event_loop().time() < deadline:
+        if not svc_ready:
+            try:
+                core_v1.read_namespaced_service(svc_name, namespace)
+                svc_ready = True
+                logger.info("CNPG service %s/%s is ready", namespace, svc_name)
+            except ApiException as e:
+                if e.status != 404:
+                    raise
+        if not secret_ready:
+            try:
+                core_v1.read_namespaced_secret(secret_name, namespace)
+                secret_ready = True
+                logger.info("CNPG app secret %s/%s is ready", namespace, secret_name)
+            except ApiException as e:
+                if e.status != 404:
+                    raise
+        if svc_ready and secret_ready:
+            return
+        logger.debug(
+            "CNPG not ready yet (svc=%s, secret=%s), waiting...", svc_ready, secret_ready
+        )
+        await asyncio.sleep(10)
+
+    missing = []
+    if not svc_ready:
+        missing.append(f"Service/{svc_name}")
+    if not secret_ready:
+        missing.append(f"Secret/{secret_name}")
     raise kopf.TemporaryError(
-        f"CNPG service {svc_name} did not appear within {timeout}s", delay=30
+        f"CNPG resources did not appear within {timeout}s: {', '.join(missing)}", delay=30
     )
 
 
@@ -773,14 +802,14 @@ async def reconcile(spec, meta, status, patch, logger, **kwargs):
             )
         else:
             # In-cluster PostgreSQL via CloudNativePG.
-            # creds_secret (username+password) is used only for CNPG bootstrap.
-            # At runtime the operator uses the CNPG-auto-created <name>-db-app
-            # Secret which contains host, port, dbname, username, password.
+            # CNPG auto-generates credentials and writes them to <name>-db-app
+            # (host, port, dbname, username, password, uri, …).
+            # We wait for both the Service and that Secret before continuing.
             cnpg_cluster = build_cnpg_cluster(name, namespace, spec)
             kopf.adopt(cnpg_cluster)
             manifests.append(cnpg_cluster)
             _apply_manifest(cnpg_cluster)
-            await _wait_for_cnpg_service(name, namespace)
+            await _wait_for_cnpg_ready(name, namespace)
             runtime_secret = f"{name}-db-app"
             db_secret_envs += [
                 _secret_env("DB_HOST",     runtime_secret, "host"),

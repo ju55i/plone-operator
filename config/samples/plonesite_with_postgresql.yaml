@@ -40,15 +40,15 @@ spec:
       memory: "1Gi"
 
   # PostgreSQL database via CloudNativePG (in-cluster).
-  # credentialsSecret must contain keys: username, password
-  # (used for CNPG bootstrap; runtime credentials come from <name>-db-app Secret).
+  # CNPG auto-generates credentials and writes the runtime connection
+  # details (host, port, dbname, username, password, uri, …) to the
+  # <name>-db-app Secret.  No credentialsSecret needed for cnpg: true.
   #
-  # For external PostgreSQL set cnpg: false and provide a Secret with keys:
-  #   host, port, dbname, username, password.
+  # For external PostgreSQL set cnpg: false and provide a Secret
+  # (credentialsSecret) with keys: host, port, dbname, username, password.
   database:
     type: "postgresql"
     cnpg: true
-    credentialsSecret: "plone-db-credentials"
     packIntervalDays: 7
 
   # Persistent storage

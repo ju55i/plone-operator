@@ -2,6 +2,7 @@ apiVersion: plone.org/v1alpha1
 kind: PloneSite
 metadata:
   name: classic-plone
+  namespace: plone
 spec:
   deploymentType: "classic"
   siteId: "Plone"
@@ -11,12 +12,10 @@ spec:
   image: "plone/plone-backend:latest"
   replicas: 1
 
-  # nip.io resolves *.192.168.49.2.nip.io → 192.168.49.2 (minikube IP)
-  # Traefik HTTP NodePort is 30121.
-  # The operator will create a Traefik Middleware that rewrites every
-  # incoming path to:
-  #   /VirtualHostBase/http/classic-plone.192.168.49.2.nip.io:30121/Plone/VirtualHostRoot/<path>
-  publicUrl: "http://classic-plone.192.168.49.2.nip.io:30121"
+  # QEMU driver: minikube IP is not reachable from host.
+  # Use kubectl port-forward svc/traefik 8080:80 -n kube-system, then
+  # 127.0.0.1.nip.io resolves to 127.0.0.1 (loopback).
+  publicUrl: "http://classic-plone.127.0.0.1.nip.io:8080"
   sitePath: "Plone"
 
   ingress:

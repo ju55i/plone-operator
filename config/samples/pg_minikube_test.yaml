@@ -1,0 +1,38 @@
+apiVersion: plone.org/v1alpha1
+kind: PloneSite
+metadata:
+  name: pg-plone
+  namespace: plone
+spec:
+  siteName: "Plone with PostgreSQL"
+  siteId: "Plone"
+
+  # Use Volto frontend
+  deploymentType: "volto"
+
+  # Admin credentials are read from a Secret named "<cr-name>-admin".
+  # kubectl create secret generic pg-plone-admin \
+  #   --from-literal=username=admin --from-literal=password=admin
+
+  replicas: 1
+
+  # QEMU driver: minikube IP is not reachable from host.
+  # Use kubectl port-forward svc/traefik 8080:80 -n kube-system, then
+  # 127.0.0.1.nip.io resolves to 127.0.0.1 (loopback).
+  publicUrl: "http://pg-plone.127.0.0.1.nip.io:8080"
+
+  ingress:
+    enabled: true
+    className: "traefik"
+
+  # In-cluster PostgreSQL via CloudNativePG.
+  # CNPG auto-generates the "plone" database, "plone" owner, and writes
+  # all connection details to pg-plone-db-app Secret automatically.
+  # No credentialsSecret needed for cnpg: true.
+  database:
+    type: "postgresql"
+    cnpg: true
+
+  persistence:
+    enabled: true
+    size: "5Gi"

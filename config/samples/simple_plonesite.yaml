@@ -2,6 +2,7 @@ apiVersion: plone.org/v1alpha1
 kind: PloneSite
 metadata:
   name: simple-plone
+  namespace: plone
 spec:
   # Minimal configuration for a simple Plone site with Volto
   siteName: "Simple Plone"
@@ -36,9 +37,10 @@ spec:
   #   - Set CORS_ALLOW_ORIGIN on the backend
   #   - Create a Traefik Ingress routing <host> → frontend service
   #
-  # nip.io resolves *.192.168.49.2.nip.io to 192.168.49.2 (minikube IP);
-  # Traefik NodePort 30121 is HTTP.
-  publicUrl: "http://simple-plone.192.168.49.2.nip.io:30121"
+  # QEMU driver: minikube IP is not reachable from host.
+  # Use kubectl port-forward svc/traefik 8080:80 -n kube-system, then
+  # 127.0.0.1.nip.io resolves to 127.0.0.1 (loopback).
+  publicUrl: "http://simple-plone.127.0.0.1.nip.io:8080"
   ingress:
     enabled: true
     className: "traefik"

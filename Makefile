@@ -3,6 +3,8 @@
 IMG ?= plone-operator:latest
 # Operator-SDK version
 OPERATOR_SDK_VERSION ?= v1.32.0
+# Namespace where PloneSite CRs and their resources live
+PLONE_NS ?= plone
 
 # Build the docker image
 .PHONY: docker-build
@@ -18,6 +20,7 @@ docker-push:
 .PHONY: deploy
 deploy:
 	kubectl apply -f config/manager/namespace.yaml
+	kubectl apply -f config/manager/plone-namespace.yaml
 	kubectl apply -f config/crd/bases/
 	kubectl apply -f config/rbac/
 	kubectl apply -f config/manager/
@@ -39,15 +42,36 @@ install:
 uninstall:
 	kubectl delete -f config/crd/bases/ --ignore-not-found=true
 
-# Deploy sample PloneSite CR
+# Create the admin secrets required by the sample PloneSite CRs in PLONE_NS.
+# These are idempotent (--dry-run=client | apply).
+.PHONY: create-secrets
+create-secrets:
+	kubectl create secret generic simple-plone-admin \
+		-n ${PLONE_NS} \
+		--from-literal=username=admin --from-literal=password=admin \
+		--dry-run=client -o yaml | kubectl apply -f -
+	kubectl create secret generic classic-plone-admin \
+		-n ${PLONE_NS} \
+		--from-literal=username=admin --from-literal=password=admin \
+		--dry-run=client -o yaml | kubectl apply -f -
+	kubectl create secret generic pg-plone-admin \
+		-n ${PLONE_NS} \
+		--from-literal=username=admin --from-literal=password=admin \
+		--dry-run=client -o yaml | kubectl apply -f -
+
+# Deploy sample PloneSite CRs (requires secrets — run create-secrets first)
 .PHONY: deploy-sample
 deploy-sample:
-	kubectl apply -f config/samples/
+	kubectl apply -f config/samples/simple_plonesite.yaml
+	kubectl apply -f config/samples/classic_minikube_test.yaml
+	kubectl apply -f config/samples/pg_minikube_test.yaml
 
-# Delete sample PloneSite CR
+# Delete sample PloneSite CRs
 .PHONY: undeploy-sample
 undeploy-sample:
-	kubectl delete -f config/samples/ --ignore-not-found=true
+	kubectl delete -f config/samples/simple_plonesite.yaml --ignore-not-found=true
+	kubectl delete -f config/samples/classic_minikube_test.yaml --ignore-not-found=true
+	kubectl delete -f config/samples/pg_minikube_test.yaml --ignore-not-found=true
 
 # Lint: check Python code with ruff
 .PHONY: lint

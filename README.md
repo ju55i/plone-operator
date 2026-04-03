@@ -7,7 +7,7 @@ A [Kopf](https://kopf.readthedocs.io/)-based Python operator for managing Plone 
 - **Two deployment types**: Volto (React frontend + REST API backend) and Classic (backend only)
 - **Two database backends**: ZODB via ZEO (in-cluster StatefulSet) and PostgreSQL via RelStorage (external or [CloudNativePG](https://cloudnative-pg.io/))
 - **Traefik ingress**: single Ingress with correct path routing for both deployment types
-- **Virtual Host Monster**: Classic UI uses a Traefik Middleware to rewrite paths; Volto relies on `X-Forwarded-Host` headers
+- **Virtual Host Monster**: both deployment types use a Traefik `replacePathRegex` Middleware so Plone generates correct public URLs; Classic rewrites all paths, Volto scopes the rewrite to `/++api++/*` only
 - **Automatic site initialisation**: polls the REST API after deploy and creates the Plone site if it does not exist
 - **Scheduled database packing**: configurable interval (default weekly); skippable via `packIntervalDays: 0`
 - **Server-side apply**: all child resources are managed via Kubernetes SSA — no drift, no ownership conflicts
@@ -27,7 +27,7 @@ plone_operator.py  (Kopf, asyncio)
     ├── Backend Deployment + Service       (always)
     ├── Frontend Deployment + Service      (deploymentType: volto)
     │
-    ├── Traefik Middleware                 (deploymentType: classic + publicUrl)
+    ├── Traefik Middleware (<name>-rewrite) (publicUrl set)
     ├── Ingress                            (ingress.enabled: true)
     │
     └── db-pack Job (one-off, weekly)      (kopf.timer, batch/v1 Job)
@@ -48,17 +48,17 @@ All child resources carry `ownerReferences` pointing to the `PloneSite` — Kube
 ### 1. Install CRDs and deploy the operator
 
 ```bash
-# Apply CRDs, RBAC, and the operator Deployment
+# Creates plone-operator-system and plone namespaces, applies CRDs, RBAC, operator Deployment
 make deploy
 ```
 
 ### 2. Create the admin credentials Secret
 
 The operator always reads admin credentials from a Secret named `<cr-name>-admin`
-with keys `username` and `password`:
+with keys `username` and `password`. The Secret must be in the same namespace as the CR:
 
 ```bash
-kubectl create secret generic my-plone-admin \
+kubectl create secret generic my-plone-admin -n plone \
   --from-literal=username=admin \
   --from-literal=password=changeme
 ```
@@ -72,9 +72,20 @@ kubectl apply -f config/samples/simple_plonesite.yaml
 ### 4. Check status
 
 ```bash
-kubectl get plonesites
-kubectl describe plonesite my-plone
+kubectl get plonesites -n plone
+kubectl describe plonesite my-plone -n plone
 ```
+
+## Namespaces
+
+The operator uses two namespaces:
+
+| Namespace | Purpose |
+|---|---|
+| `plone-operator-system` | Operator Deployment, ServiceAccount, RBAC |
+| `plone` | PloneSite CRs and all their child resources |
+
+`make deploy` creates both namespaces. Admin secrets and the PloneSite CRs themselves must be created in the `plone` namespace (or whichever namespace you choose — the operator watches all namespaces).
 
 ## PloneSite CR Reference
 
@@ -85,7 +96,7 @@ apiVersion: plone.org/v1alpha1
 kind: PloneSite
 metadata:
   name: my-plone
-  namespace: default
+  namespace: plone
 spec:
   siteName: "My Plone Site"
   siteId: "Plone"
@@ -100,7 +111,7 @@ spec:
 Create the required Secret first:
 
 ```bash
-kubectl create secret generic my-plone-admin \
+kubectl create secret generic my-plone-admin -n plone \
   --from-literal=username=admin --from-literal=password=changeme
 ```
 
@@ -111,7 +122,7 @@ apiVersion: plone.org/v1alpha1
 kind: PloneSite
 metadata:
   name: production-plone
-  namespace: default
+  namespace: plone
 spec:
   siteName: "Production Plone"
   siteId: "Plone"
@@ -126,7 +137,6 @@ spec:
   database:
     type: "postgresql"
     cnpg: true
-    credentialsSecret: "production-plone-db"   # keys: username, password
     packIntervalDays: 7
   persistence:
     enabled: true
@@ -143,16 +153,11 @@ spec:
     TZ: "America/New_York"
 ```
 
-Create the required Secrets first:
+Only the admin Secret is required — CNPG auto-generates the database credentials:
 
 ```bash
-# Admin credentials
-kubectl create secret generic production-plone-admin \
+kubectl create secret generic production-plone-admin -n plone \
   --from-literal=username=admin --from-literal=password=changeme
-
-# CNPG bootstrap credentials (CNPG creates the runtime <name>-db-app Secret)
-kubectl create secret generic production-plone-db \
-  --from-literal=username=plone --from-literal=password=dbpassword
 ```
 
 ### Classic UI example
@@ -162,7 +167,7 @@ apiVersion: plone.org/v1alpha1
 kind: PloneSite
 metadata:
   name: classic-plone
-  namespace: default
+  namespace: plone
 spec:
   siteName: "Classic Plone"
   siteId: "Plone"
@@ -190,7 +195,7 @@ spec:
 | `deploymentType` | string | `"volto"` | `volto` or `classic` |
 | `image` | string | `plone/plone-backend:latest` | Backend container image |
 | `replicas` | integer | `1` | Backend replica count |
-| `publicUrl` | string | — | Public URL of the site (e.g. `https://example.com`). Enables Ingress and sets CORS / Volto API path. |
+| `publicUrl` | string | — | Public URL of the site (e.g. `https://example.com`). Enables Ingress and VHM rewriting. |
 | `sitePath` | string | `siteId` | Zope traversal path to the site object; used for Classic UI path rewriting. |
 | `addons` | array | `[]` | Plone add-ons to activate |
 | `environment` | object | `{}` | Extra environment variables injected into the backend |
@@ -213,15 +218,15 @@ from the CR name to avoid collisions.
 |---|---|---|---|
 | `type` | string | `"zodb"` | `zodb` or `postgresql` |
 | `cnpg` | boolean | `false` | Use CloudNativePG for in-cluster PostgreSQL |
-| `credentialsSecret` | string | — | Secret name for PostgreSQL credentials (see below) |
+| `credentialsSecret` | string | — | Required for external PostgreSQL (`cnpg: false`) only — see below |
 | `packIntervalDays` | integer | `7` | Days between db-pack jobs; `0` disables packing |
 
-**`credentialsSecret` key requirements:**
+**`credentialsSecret` usage:**
 
-| Scenario | Required keys |
+| Scenario | Behaviour |
 |---|---|
-| External PostgreSQL (`cnpg: false`) | `host`, `port`, `dbname`, `username`, `password` |
-| CNPG in-cluster (`cnpg: true`) | `username`, `password` (bootstrap only; runtime uses `<name>-db-app`) |
+| External PostgreSQL (`cnpg: false`) | Required. Secret must contain: `host`, `port`, `dbname`, `username`, `password` |
+| CNPG in-cluster (`cnpg: true`) | Not used. CNPG auto-generates credentials and writes `<name>-db-app` Secret |
 
 ### `persistence`
 
@@ -237,24 +242,30 @@ Standard Kubernetes `resources` block (`limits` / `requests` with `cpu` and `mem
 
 ## Ingress and URL Rewriting
 
+When `publicUrl` is set the operator creates a Traefik `replacePathRegex` Middleware
+named `<name>-rewrite` that rewrites request paths to include the Zope Virtual Host
+Monster (VHM) traversal prefix, so Plone generates correct absolute `@id` URLs.
+
 ### Volto (`deploymentType: volto`)
 
-When `publicUrl` is set the operator:
+The operator:
 1. Sets `RAZZLE_API_PATH=<publicUrl>` on the Volto frontend (browser-side API base URL).
-2. Sets `RAZZLE_INTERNAL_API_PATH=http://<name>-backend:8080/<siteId>` (Node.js SSR).
+2. Sets `RAZZLE_INTERNAL_API_PATH=http://<name>-backend.<ns>.svc.cluster.local:8080/<siteId>` (Node.js SSR).
 3. Sets `CORS_ALLOW_ORIGIN=<publicUrl>` on the backend.
-4. Creates a single Ingress with two `Prefix` paths:
-   - `/++api++` → `<name>-backend:8080` (REST API)
-   - `/` → `<name>-frontend:3000`
-
-No path rewriting middleware is used for Volto — Traefik forwards `X-Forwarded-Host` and `X-Forwarded-Proto`, which the Plone backend uses to generate correct `@id` URLs.
+4. Creates a Traefik Middleware that rewrites only `/++api++/*` paths:
+   ```
+   /++api++/<rest>  →  /VirtualHostBase/<scheme>/<host>/<siteId>/VirtualHostRoot/++api++<rest>
+   ```
+5. Creates an Ingress with two rules, the `/++api++` rule annotated with the middleware:
+   - `/++api++` → `<name>-backend:8080` (REST API, rewritten via VHM)
+   - `/` → `<name>-frontend:3000` (Volto frontend, no rewrite)
 
 ### Classic (`deploymentType: classic`)
 
-When `publicUrl` is set the operator:
-1. Creates a Traefik `Middleware` that rewrites every incoming path to the Zope traversal URL:
+The operator:
+1. Creates a Traefik Middleware that rewrites all paths:
    ```
-   /VirtualHostBase/<scheme>/<host>/Plone/VirtualHostRoot/<original-path>
+   /<rest>  →  /VirtualHostBase/<scheme>/<host>/<siteId>/VirtualHostRoot/<rest>
    ```
 2. Creates an Ingress with a single `/` → `<name>-backend:8080` rule, annotated with the middleware.
 
@@ -263,7 +274,7 @@ When `publicUrl` is set the operator:
 | Field | Description |
 |---|---|
 | `phase` | `Pending`, `Running`, or `Failed` |
-| `siteUrl` | Internal cluster URL of the Plone site |
+| `siteUrl` | Public URL of the running site |
 | `deploymentType` | Reflects the active `deploymentType` |
 | `ingressConfigured` | `true` if a `publicUrl` was provided |
 | `lastPackTime` | ISO-8601 timestamp of the last db-pack job |
@@ -294,7 +305,7 @@ plone-operator/
 └── config/
     ├── crd/bases/             # PloneSite CRD
     ├── rbac/                  # ServiceAccount, Role, RoleBinding
-    ├── manager/               # Operator Deployment + Namespace
+    ├── manager/               # Operator Deployment + Namespaces
     └── samples/               # Example PloneSite CRs
 ```
 
@@ -326,18 +337,25 @@ make minikube-load
 
 # Or: build + deploy everything from scratch
 make minikube-deploy
+
+# Create admin secrets for all sample CRs in the plone namespace
+make create-secrets
+
+# Deploy the three minikube sample CRs
+make deploy-sample
 ```
 
 ### Makefile targets
 
 | Target | Description |
 |---|---|
-| `make deploy` | Apply CRDs, RBAC, and operator Deployment |
+| `make deploy` | Create namespaces, apply CRDs, RBAC, and operator Deployment |
 | `make undeploy` | Remove operator Deployment and RBAC |
 | `make install` | Apply CRDs only |
 | `make uninstall` | Remove CRDs |
-| `make deploy-sample` | Apply all files under `config/samples/` |
-| `make undeploy-sample` | Delete sample CRs |
+| `make create-secrets` | Create sample admin secrets in `PLONE_NS` (default: `plone`) |
+| `make deploy-sample` | Apply the three minikube sample PloneSite CRs |
+| `make undeploy-sample` | Delete the sample CRs |
 | `make minikube-load` | Build image in minikube daemon + rollout restart |
 | `make minikube-deploy` | `minikube-load` + `deploy` |
 | `make lint` | `ruff check plone_operator.py` |
@@ -354,37 +372,39 @@ kubectl logs -n plone-operator-system deployment/plone-operator-controller-manag
 ### PloneSite status
 
 ```bash
-kubectl get plonesites
-kubectl describe plonesite <name>
+kubectl get plonesites -n plone
+kubectl describe plonesite <name> -n plone
 ```
 
 ### Pod not starting
 
 ```bash
-# Check that the admin Secret exists with the correct name and keys
-kubectl get secret <cr-name>-admin -o yaml
+# Check that the admin Secret exists in the correct namespace
+kubectl get secret <cr-name>-admin -n plone -o yaml
 
-# For PostgreSQL: check credentialsSecret and (for CNPG) <cr-name>-db-app
-kubectl get secret <credentialsSecret> -o yaml
-kubectl get secret <cr-name>-db-app -o yaml
+# For CNPG PostgreSQL: check the auto-generated runtime Secret
+kubectl get secret <cr-name>-db-app -n plone -o yaml
+
+# For external PostgreSQL: check credentialsSecret
+kubectl get secret <credentialsSecret> -n plone -o yaml
 ```
 
 ### Ingress not routing correctly
 
 ```bash
-kubectl get ingress <cr-name>-ingress -o yaml
-# For Classic UI: verify the Traefik Middleware exists
-kubectl get middleware <cr-name>-rewrite -o yaml
+kubectl get ingress <cr-name> -n plone -o yaml
+# Verify the Traefik Middleware exists
+kubectl get middleware <cr-name>-rewrite -n plone -o yaml
 ```
 
 ### Database pack job not running
 
 ```bash
 # Check status.lastPackTime and packIntervalDays
-kubectl get plonesite <name> -o jsonpath='{.status.lastPackTime}'
+kubectl get plonesite <name> -n plone -o jsonpath='{.status.lastPackTime}'
 
 # List completed pack jobs
-kubectl get jobs -l app.kubernetes.io/component=db-pack
+kubectl get jobs -n plone -l app.kubernetes.io/component=db-pack
 ```
 
 ## License
