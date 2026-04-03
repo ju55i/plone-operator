@@ -1,207 +1,159 @@
-# Plone Operator Quick Reference
+# Plone Operator — Quick Reference
 
-## Quick Start
+## Deploy the operator
 
 ```bash
-# 1. Build and deploy operator
-make docker-build IMG=plone-operator:latest
-make install
-make deploy
+make deploy          # CRDs + RBAC + operator Deployment
+make install         # CRDs only
+```
 
-# 2. Create admin secret
-kubectl create secret generic plone-admin-password \
-  --from-literal=password='admin123'
+## Create a Plone site
 
-# 3. Deploy Plone
+```bash
+# 1. Admin credentials Secret  (always named <cr-name>-admin)
+kubectl create secret generic my-plone-admin \
+  --from-literal=username=admin \
+  --from-literal=password=changeme
+
+# 2. Apply the CR
 kubectl apply -f config/samples/simple_plonesite.yaml
 
-# 4. Check status
-kubectl get plonesites
-kubectl describe plonesite simple-plone
-
-# 5. Access Plone (Volto frontend)
-kubectl port-forward service/simple-plone-frontend 3000:3000
-# Open http://localhost:3000
+# 3. Watch status
+kubectl get plonesites -w
 ```
 
-## Common Commands
+## Minimal CR examples
 
-```bash
-# List all Plone sites
-kubectl get plonesites -A
+### Volto + ZEO (development)
 
-# Get detailed information
-kubectl describe plonesite <name> -n <namespace>
-
-# Check Helm releases
-helm list -n <namespace>
-
-# View Helm values
-helm get values <plonesite-name> -n <namespace>
-
-# Check logs
-kubectl logs -n plone-operator-system -l control-plane=controller-manager -f
-
-# Delete a Plone site
-kubectl delete plonesite <name> -n <namespace>
-```
-
-## Deployment Type Matrix
-
-| Database | Deployment | Helm Chart | Frontend Port | Backend Port |
-|----------|------------|------------|---------------|--------------|
-| ZODB | Volto | plone6-volto-zeo | 3000 | 8080 |
-| PostgreSQL | Volto | plone6-volto-pg | 3000 | 8080 |
-| PostgreSQL | Classic | plone6-classic-pg | - | 8080 |
-
-## Minimal Examples
-
-### Volto with ZODB (Development)
 ```yaml
 apiVersion: plone.org/v1alpha1
 kind: PloneSite
 metadata:
-  name: dev-plone
+  name: my-plone
 spec:
   deploymentType: "volto"
   database:
     type: "zodb"
+  persistence:
+    enabled: true
+    size: "10Gi"
 ```
 
-### Volto with PostgreSQL (Production)
+### Volto + CNPG PostgreSQL + Ingress (production)
+
 ```yaml
 apiVersion: plone.org/v1alpha1
 kind: PloneSite
 metadata:
-  name: prod-plone
+  name: my-plone
 spec:
   deploymentType: "volto"
-  vhmUrl: "https://www.example.com"
-  ingress:
-    enabled: true
-    className: "nginx"
-    tls: true
-  database:
-    type: "postgresql"
+  image: "plone/plone-backend:6.0"
   replicas: 3
-```
-
-### Classic UI with PostgreSQL
-```yaml
-apiVersion: plone.org/v1alpha1
-kind: PloneSite
-metadata:
-  name: classic-plone
-spec:
-  deploymentType: "classic"
-  vhmUrl: "https://classic.example.com"
-  database:
-    type: "postgresql"
-```
-
-## Secrets Reference
-
-### Admin Password Secret
-```bash
-kubectl create secret generic plone-admin-password \
-  --from-literal=password='your-password'
-```
-
-### PostgreSQL Secret (for integrated PostgreSQL)
-```bash
-kubectl create secret generic plonedb \
-  --from-literal=database-name='plone' \
-  --from-literal=database-user='plone' \
-  --from-literal=database-password='db-password'
-```
-
-## Port Forwarding
-
-### Volto Frontend
-```bash
-kubectl port-forward service/<plonesite-name>-frontend 3000:3000
-```
-
-### Backend API
-```bash
-kubectl port-forward service/<plonesite-name>-backend 8080:8080
-```
-
-### Classic UI
-```bash
-kubectl port-forward service/<plonesite-name>-backend 8080:8080
-```
-
-## Ingress Examples
-
-### Nginx Ingress
-```yaml
-spec:
-  vhmUrl: "https://www.example.com"
-  ingress:
-    enabled: true
-    className: "nginx"
-    tls: true
-```
-
-### Traefik Ingress
-```yaml
-spec:
   vhmUrl: "https://www.example.com"
   ingress:
     enabled: true
     className: "traefik"
     tls: true
+  database:
+    type: "postgresql"
+    cnpg: true
+    credentialsSecret: "my-plone-db"   # keys: username, password
 ```
 
-## Troubleshooting Quick Checks
+### Classic UI + ZEO
+
+```yaml
+apiVersion: plone.org/v1alpha1
+kind: PloneSite
+metadata:
+  name: my-plone
+spec:
+  deploymentType: "classic"
+  vhmUrl: "https://classic.example.com"
+  ingress:
+    enabled: true
+    className: "traefik"
+    tls: true
+  database:
+    type: "zodb"
+```
+
+## Secrets reference
 
 ```bash
-# 1. Check operator is running
-kubectl get pods -n plone-operator-system
+# Admin credentials  (name must be <cr-name>-admin)
+kubectl create secret generic my-plone-admin \
+  --from-literal=username=admin \
+  --from-literal=password=changeme
 
-# 2. Check PloneSite status
-kubectl get plonesites -A
+# External PostgreSQL credentials  (keys must match exactly)
+kubectl create secret generic my-db-secret \
+  --from-literal=host=postgres.example.com \
+  --from-literal=port=5432 \
+  --from-literal=dbname=plone \
+  --from-literal=username=plone \
+  --from-literal=password=dbpassword
 
-# 3. Check Helm release
-helm list -A
+# CNPG bootstrap credentials  (CNPG creates <cr-name>-db-app at runtime)
+kubectl create secret generic my-plone-db \
+  --from-literal=username=plone \
+  --from-literal=password=dbpassword
+```
 
-# 4. Check pods
-kubectl get pods -n <namespace>
+## Accessing the site
 
-# 5. Check services
-kubectl get svc -n <namespace>
+```bash
+# Volto frontend
+kubectl port-forward service/my-plone-frontend 3000:3000
+# → http://localhost:3000
 
-# 6. Check ingress
-kubectl get ingress -n <namespace>
+# Backend / Classic UI
+kubectl port-forward service/my-plone-backend 8080:8080
+# → http://localhost:8080/Plone
+```
 
-# 7. Check PVCs
-kubectl get pvc -n <namespace>
+## Troubleshooting
 
-# 8. Check secrets
-kubectl get secrets -n <namespace>
-
-# 9. Describe PloneSite for events
-kubectl describe plonesite <name> -n <namespace>
-
-# 10. Check operator logs
+```bash
+# Operator logs
 kubectl logs -n plone-operator-system \
-  deployment/plone-operator-controller-manager --tail=100
+  deployment/plone-operator-controller-manager -f
+
+# CR status and events
+kubectl describe plonesite <name>
+
+# Child resources
+kubectl get deploy,sts,svc,ingress,jobs \
+  -l app.kubernetes.io/part-of=<name>
+
+# Check Secrets exist
+kubectl get secret <name>-admin
+kubectl get secret <name>-db-app   # CNPG only
+
+# Last db-pack run
+kubectl get plonesite <name> -o jsonpath='{.status.lastPackTime}'
+kubectl get jobs -l app.kubernetes.io/component=db-pack
 ```
 
-## Resource Cleanup
+## Cleanup
 
 ```bash
-# Delete a Plone site (keeps PVCs)
-kubectl delete plonesite <name> -n <namespace>
+# Delete a site (child resources GC'd via ownerReferences; PVCs are retained)
+kubectl delete plonesite <name>
 
-# Delete Helm release (if needed)
-helm uninstall <plonesite-name> -n <namespace>
+# Delete PVCs manually if no longer needed (data loss!)
+kubectl delete pvc -l app.kubernetes.io/part-of=<name>
 
-# Delete PVCs (data will be lost!)
-kubectl delete pvc -n <namespace> -l app.kubernetes.io/instance=<plonesite-name>
-
-# Uninstall operator
+# Remove operator
 make undeploy
 make uninstall
+```
+
+## Minikube workflow
+
+```bash
+make minikube-load     # rebuild image inside minikube + rollout restart
+make minikube-deploy   # rebuild + deploy everything from scratch
 ```
