@@ -6,7 +6,8 @@ metadata:
 spec:
   deploymentType: "classic"
   siteId: "Plone"
-  adminPasswordSecret: "plone-admin-password"
+  # Name of the Kubernetes Secret containing admin credentials (keys: username, password).
+  adminPasswordSecret: "plone-admin-secret"
   image: "plone/plone-backend:latest"
   replicas: 1
 
