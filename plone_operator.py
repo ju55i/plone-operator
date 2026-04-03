@@ -166,8 +166,14 @@ def build_zeo_statefulset(name: str, namespace: str, spec: dict[str, Any]) -> di
         },
     }
 
-    if persistence_enabled:
-        container["volumeMounts"] = [{"name": "zeo-data", "mountPath": "/data"}]
+    # The ZEO container always mounts /data; the backing volume is either a
+    # PVC (persistence.enabled: true, the default) or an emptyDir for
+    # ephemeral/CI use cases (persistence.enabled: false).
+    container["volumeMounts"] = [{"name": "zeo-data", "mountPath": "/data"}]
+
+    pod_spec: dict[str, Any] = {"containers": [container]}
+    if not persistence_enabled:
+        pod_spec["volumes"] = [{"name": "zeo-data", "emptyDir": {}}]
 
     manifest: dict[str, Any] = {
         "apiVersion": "apps/v1",
@@ -183,7 +189,7 @@ def build_zeo_statefulset(name: str, namespace: str, spec: dict[str, Any]) -> di
             "selector": {"matchLabels": {"app.kubernetes.io/part-of": name, "app.kubernetes.io/component": "zeo"}},
             "template": {
                 "metadata": {"labels": {**_labels(name), "app.kubernetes.io/component": "zeo"}},
-                "spec": {"containers": [container]},
+                "spec": pod_spec,
             },
         },
     }
