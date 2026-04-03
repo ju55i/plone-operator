@@ -2,7 +2,6 @@ apiVersion: plone.org/v1alpha1
 kind: PloneSite
 metadata:
   name: my-plone-site
-  namespace: default
 spec:
   # Site configuration
   siteName: "My Plone Site"

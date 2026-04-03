@@ -2,7 +2,6 @@ apiVersion: plone.org/v1alpha1
 kind: PloneSite
 metadata:
   name: classic-plone
-  namespace: default
 spec:
   deploymentType: "classic"
   siteId: "Plone"

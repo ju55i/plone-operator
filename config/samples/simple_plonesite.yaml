@@ -2,7 +2,6 @@ apiVersion: plone.org/v1alpha1
 kind: PloneSite
 metadata:
   name: simple-plone
-  namespace: default
 spec:
   # Minimal configuration for a simple Plone site with Volto
   siteName: "Simple Plone"
