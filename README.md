@@ -9,9 +9,10 @@ A [Kopf](https://kopf.readthedocs.io/)-based Python operator for managing Plone 
 - **Traefik ingress**: single Ingress with correct path routing for both deployment types
 - **Virtual Host Monster**: both deployment types use a Traefik `replacePathRegex` Middleware so Plone generates correct public URLs; Classic rewrites all paths, Volto scopes the rewrite to `/++api++/*` only
 - **Automatic site initialisation**: polls the REST API after deploy and creates the Plone site if it does not exist
+- **Automatic database migration**: after every reconcile the operator calls `GET /@upgrade`; if pending steps are detected it calls `POST /@upgrade` to run the migration — idempotent and safe on a clean install
 - **Scheduled database packing**: configurable interval (default weekly); skippable via `packIntervalDays: 0`
 - **Server-side apply**: all child resources are managed via Kubernetes SSA — no drift, no ownership conflicts
-- **Status tracking**: `phase`, `siteUrl`, `deploymentType`, `ingressConfigured`, `lastPackTime` surfaced on the CR
+- **Status tracking**: `phase`, `siteUrl`, `deploymentType`, `ingressConfigured`, `lastPackTime`, `lastUpgradeTime` surfaced on the CR
 
 ## Architecture
 
@@ -274,11 +275,77 @@ The operator:
 | `deploymentType` | Reflects the active `deploymentType` |
 | `ingressConfigured` | `true` if a `publicUrl` was provided |
 | `lastPackTime` | ISO-8601 timestamp of the last db-pack job |
+| `lastUpgradeTime` | ISO-8601 timestamp of the last automatic Plone DB upgrade |
 | `conditions` | Standard Kubernetes condition array (`Ready`) |
 
-## Database Packing
+## Automatic Database Upgrade
 
-A Kopf timer fires daily and creates a one-off Kubernetes `Job` if
+After every successful reconcile the operator runs a two-step upgrade check
+against the live backend's REST API using the admin credentials from the
+`<name>-admin` Secret:
+
+1. **`GET /{siteId}/@upgrade`** — reads the current filesystem generation
+   (`versions.fs`) and the instance generation (`versions.instance`).
+2. If they differ, **`POST /{siteId}/@upgrade`** — executes all pending
+   migration steps (timeout: 300 s).
+
+The check is idempotent: on a fresh install or when the site is already
+up to date it logs `"already up to date"` and returns immediately.  When
+migration runs, the operator sets `status.lastUpgradeTime`.
+
+### Upgrading Plone (e.g. 6.0 → 6.1)
+
+Patch the backend (and optionally frontend) image:
+
+```bash
+kubectl patch plonesite <name> -n plone --type=merge \
+  -p '{"spec":{"image":"plone/plone-backend:6.1","frontendImage":"plone/plone-frontend:18"}}'
+```
+
+The operator will:
+1. Apply the new image to the backend Deployment (rolling update).
+2. Wait for the backend to become healthy.
+3. Detect pending upgrade steps via `GET /@upgrade`.
+4. Run `POST /@upgrade` to migrate the ZODB or PostgreSQL schema.
+5. Set `status.lastUpgradeTime` and mark the site `Running`.
+
+Watch progress in the operator logs:
+
+```bash
+kubectl logs -n plone-operator-system \
+  deployment/plone-operator-controller-manager -f
+```
+
+Expected output:
+
+```
+Plone site plone/Plone needs upgrading (18 step(s)), running migration...
+Plone DB upgrade complete for plone/Plone: done
+```
+
+> **Warning**: Do not downgrade the backend image after running a migration.
+> ZODB and RelStorage schemas are not backward-compatible.
+
+### Checking upgrade status
+
+```bash
+# Was an upgrade performed, and when?
+kubectl get plonesite <name> -n plone \
+  -o jsonpath='{.status.lastUpgradeTime}'
+
+# Confirm the site is up to date (fs == instance, no pending steps)
+kubectl exec -n plone deployment/<name>-backend -- \
+  python3 -c "
+import urllib.request, base64, json
+url = 'http://localhost:8080/<siteId>/@upgrade'
+req = urllib.request.Request(url)
+req.add_header('Accept', 'application/json')
+req.add_header('Authorization', 'Basic ' + base64.b64encode(b'admin:password').decode())
+print(json.dumps(json.loads(urllib.request.urlopen(req).read()).get('versions'), indent=2))
+"
+```
+
+## Database Packing
 `packIntervalDays` days have elapsed since `status.lastPackTime`.
 
 - **ZEO**: runs `zeopack` from `plone/plone-zeo:6`
@@ -352,8 +419,8 @@ make deploy-sample
 | `make create-secrets` | Create sample admin secrets in `PLONE_NS` (default: `plone`) |
 | `make deploy-sample` | Apply the three minikube sample PloneSite CRs |
 | `make undeploy-sample` | Delete the sample CRs |
-| `make minikube-load` | Build image in minikube daemon + rollout restart |
-| `make minikube-deploy` | `minikube-load` + `deploy` |
+| `make minikube-load` | Build image in minikube daemon + `kubectl set image` (updates a running operator) |
+| `make minikube-deploy` | Build image in minikube daemon + `make deploy` (use for fresh clusters) |
 | `make lint` | `ruff check plone_operator.py` |
 | `make typecheck` | `ty check plone_operator.py` |
 

@@ -151,7 +151,34 @@ kubectl get secret <name>-db-app -n plone   # CNPG only — created after bootst
 kubectl get plonesite <name> -n plone \
   -o jsonpath='{.status.lastPackTime}'
 kubectl get jobs -l app.kubernetes.io/component=db-pack -n plone
+
+# Last automatic DB upgrade
+kubectl get plonesite <name> -n plone \
+  -o jsonpath='{.status.lastUpgradeTime}'
 ```
+
+## Upgrading Plone
+
+Patch the backend (and, for Volto, the frontend) image — the operator detects
+pending migration steps via `GET /@upgrade` and runs `POST /@upgrade`
+automatically:
+
+```bash
+kubectl patch plonesite <name> -n plone --type=merge \
+  -p '{"spec":{"image":"plone/plone-backend:6.1","frontendImage":"plone/plone-frontend:18"}}'
+```
+
+Watch the operator logs for:
+
+```
+Plone site plone/Plone needs upgrading (18 step(s)), running migration...
+Plone DB upgrade complete for plone/Plone: done
+```
+
+`status.lastUpgradeTime` is set once migration completes.
+
+> **Warning**: do not downgrade the image after a migration — ZODB and
+> RelStorage schemas are not backward-compatible.
 
 ## Cleanup
 
@@ -170,6 +197,6 @@ make uninstall
 ## Minikube workflow
 
 ```bash
-make minikube-load     # rebuild image inside minikube + rollout restart
-make minikube-deploy   # rebuild + deploy everything from scratch
+make minikube-load     # rebuild image inside minikube + kubectl set image (updates running operator)
+make minikube-deploy   # rebuild + deploy everything from scratch (fresh cluster)
 ```
