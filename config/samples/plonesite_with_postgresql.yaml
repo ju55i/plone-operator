@@ -22,7 +22,7 @@ spec:
 
   # Virtual Host Monster: the public URL Plone uses when generating links.
   # RAZZLE_API_PATH for the Volto frontend is also set to this URL.
-  vhmUrl: "https://www.example.com"
+  publicUrl: "https://www.example.com"
 
   # Ingress with TLS
   ingress:

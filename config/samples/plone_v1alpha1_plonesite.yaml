@@ -24,7 +24,7 @@ spec:
   # The public URL Plone uses when generating links.
   # For Classic UI: Traefik Middleware rewrites paths to the VHM traversal URL.
   # For Volto: sets RAZZLE_API_PATH on the frontend.
-  vhmUrl: "https://myplone.example.com"
+  publicUrl: "https://myplone.example.com"
 
   # Ingress configuration
   ingress:

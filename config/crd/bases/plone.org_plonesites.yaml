@@ -83,11 +83,17 @@ spec:
                         memory:
                           type: string
                           default: "512Mi"
-                vhmUrl:
-                  description: Virtual Host Monster URL for the site (e.g., https://example.com)
+                publicUrl:
+                  description: >
+                    Public URL of the site (e.g. https://example.com).
+                    Enables Ingress creation, sets CORS and Volto API path,
+                    and configures Classic UI path rewriting via Traefik.
                   type: string
-                vhmPath:
-                  description: Virtual Host Monster path (default is the siteId)
+                sitePath:
+                  description: >
+                    Zope traversal path to the Plone site object, used when
+                    building internal rewrite rules for Classic UI.
+                    Defaults to siteId.
                   type: string
                 ingress:
                   description: Ingress configuration
@@ -201,8 +207,8 @@ spec:
                 siteUrl:
                   description: URL to access the Plone site
                   type: string
-                vhmConfigured:
-                  description: Whether VHM is configured
+                ingressConfigured:
+                  description: Whether an Ingress has been configured
                   type: boolean
                 deploymentType:
                   description: Type of deployment (volto or classic)
@@ -220,9 +226,9 @@ spec:
         - name: Site URL
           type: string
           jsonPath: .status.siteUrl
-        - name: VHM
+        - name: Ingress
           type: boolean
-          jsonPath: .status.vhmConfigured
+          jsonPath: .status.ingressConfigured
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp

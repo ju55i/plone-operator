@@ -11,7 +11,7 @@ A [Kopf](https://kopf.readthedocs.io/)-based Python operator for managing Plone 
 - **Automatic site initialisation**: polls the REST API after deploy and creates the Plone site if it does not exist
 - **Scheduled database packing**: configurable interval (default weekly); skippable via `packIntervalDays: 0`
 - **Server-side apply**: all child resources are managed via Kubernetes SSA — no drift, no ownership conflicts
-- **Status tracking**: `phase`, `siteUrl`, `deploymentType`, `vhmConfigured`, `lastPackTime` surfaced on the CR
+- **Status tracking**: `phase`, `siteUrl`, `deploymentType`, `ingressConfigured`, `lastPackTime` surfaced on the CR
 
 ## Architecture
 
@@ -27,7 +27,7 @@ plone_operator.py  (Kopf, asyncio)
     ├── Backend Deployment + Service       (always)
     ├── Frontend Deployment + Service      (deploymentType: volto)
     │
-    ├── Traefik Middleware                 (deploymentType: classic + vhmUrl)
+    ├── Traefik Middleware                 (deploymentType: classic + publicUrl)
     ├── Ingress                            (ingress.enabled: true)
     │
     └── db-pack Job (one-off, weekly)      (kopf.timer, batch/v1 Job)
@@ -118,7 +118,7 @@ spec:
   deploymentType: "volto"
   image: "plone/plone-backend:6.0"
   replicas: 3
-  vhmUrl: "https://www.example.com"
+  publicUrl: "https://www.example.com"
   ingress:
     enabled: true
     className: "traefik"
@@ -167,7 +167,7 @@ spec:
   siteName: "Classic Plone"
   siteId: "Plone"
   deploymentType: "classic"
-  vhmUrl: "https://classic.example.com"
+  publicUrl: "https://classic.example.com"
   ingress:
     enabled: true
     className: "traefik"
@@ -190,8 +190,8 @@ spec:
 | `deploymentType` | string | `"volto"` | `volto` or `classic` |
 | `image` | string | `plone/plone-backend:latest` | Backend container image |
 | `replicas` | integer | `1` | Backend replica count |
-| `vhmUrl` | string | — | Public URL (e.g. `https://example.com`). Enables VHM and Ingress. |
-| `vhmPath` | string | `siteId` | Zope path component for VHM traversal |
+| `publicUrl` | string | — | Public URL of the site (e.g. `https://example.com`). Enables Ingress and sets CORS / Volto API path. |
+| `sitePath` | string | `siteId` | Zope traversal path to the site object; used for Classic UI path rewriting. |
 | `addons` | array | `[]` | Plone add-ons to activate |
 | `environment` | object | `{}` | Extra environment variables injected into the backend |
 
@@ -235,24 +235,24 @@ from the CR name to avoid collisions.
 
 Standard Kubernetes `resources` block (`limits` / `requests` with `cpu` and `memory`).
 
-## VHM and Ingress Behaviour
+## Ingress and URL Rewriting
 
 ### Volto (`deploymentType: volto`)
 
-When `vhmUrl` is set the operator:
-1. Sets `RAZZLE_API_PATH=<vhmUrl>` on the Volto frontend (browser-side API base URL).
+When `publicUrl` is set the operator:
+1. Sets `RAZZLE_API_PATH=<publicUrl>` on the Volto frontend (browser-side API base URL).
 2. Sets `RAZZLE_INTERNAL_API_PATH=http://<name>-backend:8080/<siteId>` (Node.js SSR).
-3. Sets `CORS_ALLOW_ORIGIN=<vhmUrl>` on the backend.
+3. Sets `CORS_ALLOW_ORIGIN=<publicUrl>` on the backend.
 4. Creates a single Ingress with two `Prefix` paths:
    - `/++api++` → `<name>-backend:8080` (REST API)
    - `/` → `<name>-frontend:3000`
 
-No VHM Middleware is used for Volto — Traefik forwards `X-Forwarded-Host` and `X-Forwarded-Proto`, which the Plone backend uses to generate correct `@id` URLs.
+No path rewriting middleware is used for Volto — Traefik forwards `X-Forwarded-Host` and `X-Forwarded-Proto`, which the Plone backend uses to generate correct `@id` URLs.
 
 ### Classic (`deploymentType: classic`)
 
-When `vhmUrl` is set the operator:
-1. Creates a Traefik `Middleware` that rewrites every incoming path to the VHM traversal URL:
+When `publicUrl` is set the operator:
+1. Creates a Traefik `Middleware` that rewrites every incoming path to the Zope traversal URL:
    ```
    /VirtualHostBase/<scheme>/<host>/Plone/VirtualHostRoot/<original-path>
    ```
@@ -265,7 +265,7 @@ When `vhmUrl` is set the operator:
 | `phase` | `Pending`, `Running`, or `Failed` |
 | `siteUrl` | Internal cluster URL of the Plone site |
 | `deploymentType` | Reflects the active `deploymentType` |
-| `vhmConfigured` | `true` if a `vhmUrl` was provided |
+| `ingressConfigured` | `true` if a `publicUrl` was provided |
 | `lastPackTime` | ISO-8601 timestamp of the last db-pack job |
 | `conditions` | Standard Kubernetes condition array (`Ready`) |
 
@@ -374,7 +374,7 @@ kubectl get secret <cr-name>-db-app -o yaml
 ```bash
 kubectl get ingress <cr-name>-ingress -o yaml
 # For Classic UI: verify the Traefik Middleware exists
-kubectl get middleware <cr-name>-vhm -o yaml
+kubectl get middleware <cr-name>-rewrite -o yaml
 ```
 
 ### Database pack job not running

@@ -67,9 +67,9 @@ def _make_env_list(env_dict: dict[str, Any]) -> list[dict[str, Any]]:
     return [{"name": k, "value": str(v)} for k, v in env_dict.items()]
 
 
-def _vhm_rewrite_path(vhm_url: str, vhm_path: str) -> str:
+def _classic_rewrite_path(public_url: str, site_path: str) -> str:
     """
-    Build the Zope VirtualHostMonster traversal path prefix.
+    Build the Zope VirtualHostMonster traversal path prefix for Classic UI.
 
     Given a public URL like ``https://example.com`` and Plone site path
     ``Plone``, returns::
@@ -78,9 +78,6 @@ def _vhm_rewrite_path(vhm_url: str, vhm_path: str) -> str:
 
     This prefix is used as-is in Traefik's ``replacePathRegex`` middleware
     replacement (the caller appends ``/$1`` for the captured request path).
-    Equivalent to the ``proxy_pass`` target in nginx::
-
-        proxy_pass http://backend:8080/VirtualHostBase/https/example.com/Plone/VirtualHostRoot/;
 
     Port handling:
     - https on 443  → omitted (Plone standard)
@@ -89,7 +86,7 @@ def _vhm_rewrite_path(vhm_url: str, vhm_path: str) -> str:
     """
     from urllib.parse import urlparse
 
-    parsed = urlparse(vhm_url.rstrip("/"))
+    parsed = urlparse(public_url.rstrip("/"))
     scheme = parsed.scheme or "http"
     hostname = parsed.hostname or ""
     port = parsed.port
@@ -100,7 +97,7 @@ def _vhm_rewrite_path(vhm_url: str, vhm_path: str) -> str:
     else:
         host_part = hostname
 
-    return f"/VirtualHostBase/{scheme}/{host_part}/{vhm_path}/VirtualHostRoot"
+    return f"/VirtualHostBase/{scheme}/{host_part}/{site_path}/VirtualHostRoot"
 
 
 def _secret_env(var_name: str, secret_name: str, secret_key: str) -> dict[str, Any]:
@@ -285,15 +282,15 @@ def build_backend_deployment(
     resources = spec.get("resources", {})
     addons = spec.get("addons", [])
     extra_env = spec.get("environment", {})
-    vhm_url = spec.get("vhmUrl", "")
+    public_url = spec.get("publicUrl", "")
 
     # Build plain env vars
     env = {
         "SITE": site_id,
         **db_env,
     }
-    if vhm_url:
-        env["CORS_ALLOW_ORIGIN"] = vhm_url
+    if public_url:
+        env["CORS_ALLOW_ORIGIN"] = public_url
     if addons:
         env["ADDONS"] = " ".join(addons)
     env.update(extra_env)
@@ -378,18 +375,18 @@ def build_backend_service(name: str, namespace: str) -> dict[str, Any]:
 
 def build_frontend_deployment(name: str, namespace: str, spec: dict[str, Any]) -> dict[str, Any]:
     site_id = spec.get("siteId", "plone")
-    vhm_url = spec.get("vhmUrl", "")
+    public_url = spec.get("publicUrl", "")
     frontend_image = spec.get("frontendImage", "plone/plone-frontend:latest")
     replicas = spec.get("replicas", 1)
 
     backend_svc = f"{name}-backend.{namespace}.svc.cluster.local"
     internal_api = f"http://{backend_svc}:8080/{site_id}"
     # RAZZLE_API_PATH is used by the browser, so it must be a publicly reachable URL.
-    # When vhmUrl is set, use it directly (scheme+host only, no path).
-    # When vhmUrl is not set, use the frontend's own cluster URL so Volto's Node.js
+    # When publicUrl is set, use it directly (scheme+host only, no path).
+    # When publicUrl is not set, use the frontend's own cluster URL so Volto's Node.js
     # server can proxy /++api++/ requests to RAZZLE_INTERNAL_API_PATH.
     frontend_svc = f"{name}-frontend.{namespace}.svc.cluster.local"
-    public_api = vhm_url if vhm_url else f"http://{frontend_svc}:3000"
+    public_api = public_url if public_url else f"http://{frontend_svc}:3000"
 
     return {
         "apiVersion": "apps/v1",
@@ -440,10 +437,10 @@ def build_frontend_deployment(name: str, namespace: str, spec: dict[str, Any]) -
 
 
 def build_frontend_service(name: str, namespace: str, spec: dict[str, Any]) -> dict[str, Any]:
-    vhm_url = spec.get("vhmUrl", "")
-    # Use NodePort when no vhmUrl so `minikube service` can provide an accessible
+    public_url = spec.get("publicUrl", "")
+    # Use NodePort when no publicUrl so `minikube service` can provide an accessible
     # URL without requiring manual port-forwarding in local dev.
-    svc_type = "ClusterIP" if vhm_url else "NodePort"
+    svc_type = "ClusterIP" if public_url else "NodePort"
     return {
         "apiVersion": "v1",
         "kind": "Service",
@@ -460,7 +457,7 @@ def build_frontend_service(name: str, namespace: str, spec: dict[str, Any]) -> d
     }
 
 
-def build_traefik_vhm_middleware(name: str, namespace: str, spec: dict[str, Any]) -> dict[str, Any]:
+def build_traefik_middleware(name: str, namespace: str, spec: dict[str, Any]) -> dict[str, Any]:
     """
     Build a Traefik Middleware manifest that rewrites request paths for
     Zope's VirtualHostMonster.
@@ -478,16 +475,16 @@ def build_traefik_vhm_middleware(name: str, namespace: str, spec: dict[str, Any]
     Traefik v3 uses ``traefik.io/v1alpha1``; Traefik v2 uses
     ``traefik.containo.us/v1alpha1`` — adjust ``apiVersion`` if needed.
     """
-    vhm_url = spec.get("vhmUrl", "")
+    public_url = spec.get("publicUrl", "")
     site_id = spec.get("siteId", "plone")
-    vhm_path = spec.get("vhmPath", site_id)
-    rewrite_base = _vhm_rewrite_path(vhm_url, vhm_path)
+    site_path = spec.get("sitePath", site_id)
+    rewrite_base = _classic_rewrite_path(public_url, site_path)
 
     return {
         "apiVersion": "traefik.io/v1alpha1",
         "kind": "Middleware",
         "metadata": {
-            "name": f"{name}-vhm",
+            "name": f"{name}-rewrite",
             "namespace": namespace,
             "labels": _labels(name),
         },
@@ -524,12 +521,12 @@ def build_ingress(name: str, namespace: str, spec: dict[str, Any]) -> dict[str, 
     """
     from urllib.parse import urlparse
 
-    vhm_url = spec.get("vhmUrl", "")
+    public_url = spec.get("publicUrl", "")
     ingress_cfg = spec.get("ingress", {})
     ingress_class = ingress_cfg.get("className", "traefik")
     tls_enabled = ingress_cfg.get("tls", False)
     deployment_type = spec.get("deploymentType", "volto")
-    host = urlparse(vhm_url.rstrip("/")).hostname or ""
+    host = urlparse(public_url.rstrip("/")).hostname or ""
 
     if deployment_type == "volto":
         paths = [
@@ -555,7 +552,7 @@ def build_ingress(name: str, namespace: str, spec: dict[str, Any]) -> dict[str, 
         ]
         # Middleware reference format: <namespace>-<middleware-name>@kubernetescrd
         annotations = {
-            "traefik.ingress.kubernetes.io/router.middlewares": f"{namespace}-{name}-vhm@kubernetescrd",
+            "traefik.ingress.kubernetes.io/router.middlewares": f"{namespace}-{name}-rewrite@kubernetescrd",
         }
 
     manifest: dict[str, Any] = {
@@ -799,20 +796,20 @@ async def reconcile(spec, meta, status, patch, logger, **kwargs):
         manifests += [frontend_deploy, frontend_svc]
 
     # -------------------------------------------------------------------
-    # Ingress + Traefik VHM Middleware (when vhmUrl is set and ingress.enabled)
+    # Ingress + Traefik Classic Middleware (when publicUrl is set and ingress.enabled)
     # -------------------------------------------------------------------
-    vhm_url = spec.get("vhmUrl", "")
+    public_url = spec.get("publicUrl", "")
     ingress_enabled = spec.get("ingress", {}).get("enabled", False)
-    if vhm_url and ingress_enabled:
+    if public_url and ingress_enabled:
         ingress = build_ingress(name, namespace, spec)
         kopf.adopt(ingress)
         manifests.append(ingress)
         # Classic UI only: Traefik Middleware that rewrites paths for VHM.
         # Volto uses X-Forwarded-Host/Proto headers for backend URL generation.
         if deployment_type != "volto":
-            vhm_middleware = build_traefik_vhm_middleware(name, namespace, spec)
-            kopf.adopt(vhm_middleware)
-            manifests.append(vhm_middleware)
+            rewrite_middleware = build_traefik_middleware(name, namespace, spec)
+            kopf.adopt(rewrite_middleware)
+            manifests.append(rewrite_middleware)
 
     # -------------------------------------------------------------------
     # Apply all manifests (skipping CNPG which was already applied above)
@@ -832,8 +829,8 @@ async def reconcile(spec, meta, status, patch, logger, **kwargs):
     # -------------------------------------------------------------------
     # Determine site URL for status
     # -------------------------------------------------------------------
-    if vhm_url:
-        site_url = vhm_url
+    if public_url:
+        site_url = public_url
     elif deployment_type == "volto":
         site_url = f"http://{name}-frontend.{namespace}.svc.cluster.local:3000"
     else:
@@ -845,7 +842,7 @@ async def reconcile(spec, meta, status, patch, logger, **kwargs):
     patch.status["phase"] = "Running"
     patch.status["siteUrl"] = site_url
     patch.status["deploymentType"] = deployment_type
-    patch.status["vhmConfigured"] = bool(vhm_url)
+    patch.status["ingressConfigured"] = bool(public_url)
     patch.status["conditions"] = [
         {
             "type": "Ready",

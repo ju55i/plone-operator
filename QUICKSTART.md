@@ -51,7 +51,7 @@ spec:
   deploymentType: "volto"
   image: "plone/plone-backend:6.0"
   replicas: 3
-  vhmUrl: "https://www.example.com"
+  publicUrl: "https://www.example.com"
   ingress:
     enabled: true
     className: "traefik"
@@ -71,7 +71,7 @@ metadata:
   name: my-plone
 spec:
   deploymentType: "classic"
-  vhmUrl: "https://classic.example.com"
+  publicUrl: "https://classic.example.com"
   ingress:
     enabled: true
     className: "traefik"

@@ -23,7 +23,7 @@ spec:
   # VHM: the public URL Plone should use when generating links.
   # The operator builds the Traefik Middleware that rewrites incoming paths to:
   #   /VirtualHostBase/https/classic.example.com/Plone/VirtualHostRoot/<path>
-  vhmUrl: "https://classic.example.com"
+  publicUrl: "https://classic.example.com"
 
   # Ingress configuration
   ingress:

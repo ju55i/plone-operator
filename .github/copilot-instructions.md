@@ -54,7 +54,7 @@ plone_operator.py  (Kopf, asyncio)
     ├── Backend Deployment + Service       (always)
     ├── Frontend Deployment + Service      (deploymentType: volto)
     │
-    ├── Traefik Middleware                 (deploymentType: classic + vhmUrl)
+    ├── Traefik Middleware                 (deploymentType: classic + publicUrl)
     ├── Ingress                            (ingress.enabled: true)
     │
     └── db-pack Job (one-off, weekly)      (kopf.timer → batch/v1 Job)
@@ -87,9 +87,9 @@ All child resources carry `ownerReferences` set via `kopf.adopt()` — Kubernete
 
 **Environment variable injection:** DB connection details are injected as individual `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` env vars via `secretKeyRef`, then `RELSTORAGE_DSN` is built using Kubernetes `$(VAR_NAME)` substitution.
 
-**VHM — Volto:** No Traefik Middleware. A single Ingress routes `/++api++` → backend and `/` → frontend. Traefik forwards `X-Forwarded-Host`/`X-Forwarded-Proto` so the backend generates correct public URLs.
+**Ingress — Volto:** No Traefik Middleware. A single Ingress routes `/++api++` → backend and `/` → frontend. Traefik forwards `X-Forwarded-Host`/`X-Forwarded-Proto` so the backend generates correct public URLs.
 
-**VHM — Classic:** A Traefik `Middleware` (type: `replacepathregex`) rewrites every incoming path to the VHM traversal URL. The Ingress is annotated to apply this middleware.
+**Ingress — Classic:** A Traefik `Middleware` named `<cr-name>-rewrite` (type: `replacepathregex`) rewrites every incoming path to the Zope traversal URL. The Ingress is annotated to apply this middleware.
 
 **Ingress class:** Traefik (`ingressClassName: traefik`). No support for nginx.
 
@@ -97,7 +97,7 @@ All child resources carry `ownerReferences` set via `kopf.adopt()` — Kubernete
 
 **`db_pack` timer:** Fires daily (`interval=86400.0`). Skips if `packIntervalDays == 0` or if fewer days than `packIntervalDays` have elapsed since `status.lastPackTime`. Writes `status.lastPackTime` after creating the Job.
 
-**Status fields:** `phase`, `siteUrl`, `deploymentType`, `vhmConfigured`, `lastPackTime`, `conditions`.
+**Status fields:** `phase`, `siteUrl`, `deploymentType`, `ingressConfigured`, `lastPackTime`, `conditions`.
 
 ## CRD
 
@@ -111,8 +111,8 @@ Key spec fields:
 | `siteId` | `plone` | Zope site path |
 | `image` | `plone/plone-backend:latest` | Backend image |
 | `replicas` | `1` | Backend replicas |
-| `vhmUrl` | — | Public URL; enables VHM + Ingress |
-| `vhmPath` | `siteId` | VHM Zope path override |
+| `publicUrl` | — | Public URL of the site; enables Ingress creation |
+| `sitePath` | `siteId` | Zope traversal path; used for Classic UI path rewriting |
 | `database.type` | `zodb` | `zodb` or `postgresql` |
 | `database.cnpg` | `false` | Use CloudNativePG |
 | `database.credentialsSecret` | — | Secret name for PG credentials |
@@ -143,7 +143,7 @@ plone-operator/
 | File | Scenario |
 |---|---|
 | `simple_plonesite.yaml` | Volto + ZEO, minikube nip.io URL |
-| `plone_v1alpha1_plonesite.yaml` | Volto + ZEO, full-featured with VHM + Ingress |
+| `plone_v1alpha1_plonesite.yaml` | Volto + ZEO, full-featured with publicUrl + Ingress |
 | `plonesite_with_postgresql.yaml` | Volto + CNPG PostgreSQL, production |
 | `plonesite_classic.yaml` | Classic UI + external PostgreSQL |
 | `classic_minikube_test.yaml` | Classic UI + ZEO, minikube nip.io URL |
