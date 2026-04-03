@@ -1,85 +1,84 @@
 # Plone Kubernetes Operator
 
-An Ansible-based Kubernetes operator for managing Plone sites using the official [Plone Helm Charts](https://github.com/plone/helm-charts). This operator provides a declarative way to deploy and manage Plone 6 installations with support for Virtual Host Monster (VHM) configuration, multiple deployment types, and various database backends.
+A [Kopf](https://kopf.readthedocs.io/)-based Python operator for managing Plone 6 CMS deployments on Kubernetes. It manages the full lifecycle of a `PloneSite` custom resource — provisioning, site initialisation, ingress, and scheduled database maintenance — without Helm.
 
 ## Features
 
-- **Automated Plone Deployment**: Deploy Plone sites using official Helm charts with a simple Custom Resource
-- **Multiple Deployment Types**: 
-  - **Volto**: Modern Plone 6 frontend with React-based Volto UI
-  - **Classic**: Traditional Plone Classic UI
-- **Virtual Host Monster Support**: Configure VHM URLs for proper URL generation behind proxies
-- **Database Options**: 
-  - **ZODB with ZEO**: Default option with integrated ZEO server
-  - **PostgreSQL**: RelStorage with PostgreSQL (integrated or external)
-- **Persistent Storage**: Automatic PVC creation for both Plone data and databases
-- **Scalability**: Configure replica count for horizontal scaling
-- **Ingress Support**: Built-in ingress configuration with TLS support
-- **Add-on Management**: Specify Plone add-ons to install
-- **Resource Management**: Configure CPU and memory limits/requests
-- **Status Tracking**: Monitor deployment status through the CR status field
+- **Two deployment types**: Volto (React frontend + REST API backend) and Classic (backend only)
+- **Two database backends**: ZODB via ZEO (in-cluster StatefulSet) and PostgreSQL via RelStorage (external or [CloudNativePG](https://cloudnative-pg.io/))
+- **Traefik ingress**: single Ingress with correct path routing for both deployment types
+- **Virtual Host Monster**: Classic UI uses a Traefik Middleware to rewrite paths; Volto relies on `X-Forwarded-Host` headers
+- **Automatic site initialisation**: polls the REST API after deploy and creates the Plone site if it does not exist
+- **Scheduled database packing**: configurable interval (default weekly); skippable via `packIntervalDays: 0`
+- **Server-side apply**: all child resources are managed via Kubernetes SSA — no drift, no ownership conflicts
+- **Status tracking**: `phase`, `siteUrl`, `deploymentType`, `vhmConfigured`, `lastPackTime` surfaced on the CR
 
 ## Architecture
 
-This operator leverages the official Plone Helm charts:
-- `plone/plone6-volto-zeo`: Plone 6 with Volto frontend and ZEO backend
-- `plone/plone6-volto-pg`: Plone 6 with Volto frontend and PostgreSQL
-- `plone/plone6-classic-pg`: Plone 6 Classic UI with PostgreSQL
+```
+PloneSite CR
+    │
+    ▼
+plone_operator.py  (Kopf, asyncio)
+    │
+    ├── ZEO StatefulSet + Service          (database.type: zodb)
+    ├── CNPG Cluster CR                    (database.type: postgresql, cnpg: true)
+    │
+    ├── Backend Deployment + Service       (always)
+    ├── Frontend Deployment + Service      (deploymentType: volto)
+    │
+    ├── Traefik Middleware                 (deploymentType: classic + vhmUrl)
+    ├── Ingress                            (ingress.enabled: true)
+    │
+    └── db-pack Job (one-off, weekly)      (kopf.timer, batch/v1 Job)
+```
 
-The operator translates PloneSite Custom Resources into Helm chart deployments, providing a simpler, more declarative interface while leveraging the community-maintained Helm charts.
-
-### Benefits of Using Helm Charts
-
-1. **Community Maintained**: The Helm charts are officially maintained by the Plone community
-2. **Battle Tested**: Charts have been tested across various scenarios and environments
-3. **Best Practices**: Charts implement Kubernetes and Plone best practices
-4. **Regular Updates**: Charts are updated with new Plone releases and improvements
-5. **Flexibility**: Underlying Helm charts can be updated independently of the operator
-6. **Documentation**: Extensive documentation available in the [helm-charts repository](https://github.com/plone/helm-charts)
-
-### How It Works
-
-1. User creates a `PloneSite` custom resource
-2. Operator watches for `PloneSite` resources
-3. Operator adds the Plone Helm repository
-4. Operator translates CR spec to Helm values
-5. Operator deploys/updates using appropriate Helm chart
-6. Operator updates CR status with deployment information
+All child resources carry `ownerReferences` pointing to the `PloneSite` — Kubernetes garbage-collects them automatically when the CR is deleted.
 
 ## Prerequisites
 
-- Kubernetes cluster (v1.19+)
-- kubectl configured to access your cluster
-- Helm 3.x installed in the cluster
-- Docker (for building the operator image)
+- Kubernetes 1.25+
+- [Traefik](https://traefik.io/) ingress controller
+- [CloudNativePG](https://cloudnative-pg.io/) operator (only if `database.cnpg: true`)
+- `kubectl` configured against your cluster
+- [uv](https://docs.astral.sh/uv/) (for local development)
 
-## Installation
+## Quick Start
 
-### 1. Build the Operator Image
-
-```bash
-make docker-build IMG=your-registry/plone-operator:latest
-make docker-push IMG=your-registry/plone-operator:latest
-```
-
-### 2. Deploy the Operator
+### 1. Install CRDs and deploy the operator
 
 ```bash
-# Create namespace and install CRDs
-kubectl create namespace plone-operator-system
-
-# Install CRDs
-make install
-
-# Deploy the operator
+# Apply CRDs, RBAC, and the operator Deployment
 make deploy
 ```
 
-## Usage
+### 2. Create the admin credentials Secret
 
-### Creating a Plone Site
+The operator always reads admin credentials from a Secret named `<cr-name>-admin`
+with keys `username` and `password`:
 
-#### Simple Example with Volto and ZEO (Default)
+```bash
+kubectl create secret generic my-plone-admin \
+  --from-literal=username=admin \
+  --from-literal=password=changeme
+```
+
+### 3. Apply a PloneSite CR
+
+```bash
+kubectl apply -f config/samples/simple_plonesite.yaml
+```
+
+### 4. Check status
+
+```bash
+kubectl get plonesites
+kubectl describe plonesite my-plone
+```
+
+## PloneSite CR Reference
+
+### Minimal example — Volto + ZEO
 
 ```yaml
 apiVersion: plone.org/v1alpha1
@@ -90,218 +89,7 @@ metadata:
 spec:
   siteName: "My Plone Site"
   siteId: "Plone"
-  deploymentType: "volto"  # Modern Plone with Volto frontend
-  adminUser: "admin"
-  adminPasswordSecret: "plone-admin-password"
-  replicas: 1
-  database:
-    type: "zodb"  # Uses ZEO server (deployed automatically)
-  persistence:
-    enabled: true
-    size: "10Gi"
-```
-
-#### Production Example with VHM, PostgreSQL, and Ingress
-
-```yaml
-apiVersion: plone.org/v1alpha1
-kind: PloneSite
-metadata:
-  name: production-plone
-  namespace: production
-spec:
-  siteName: "Production Plone"
-  siteId: "Plone"
-  
-  # Use Volto frontend
   deploymentType: "volto"
-  
-  # Admin credentials
-  adminUser: "admin"
-  adminPasswordSecret: "plone-admin-password"
-  
-  # Plone configuration
-  image: "plone/plone-backend:6.0"
-  replicas: 3
-  
-  # Virtual Host Monster configuration
-  # Critical for proper URL generation when behind ingress/proxy
-  vhmUrl: "https://www.example.com"
-  vhmPath: "Plone"
-  
-  # Ingress configuration
-  ingress:
-    enabled: true
-    className: "nginx"  # or "traefik"
-    tls: true
-  
-  # Resources
-  resources:
-    limits:
-      cpu: "4000m"
-      memory: "4Gi"
-    requests:
-      cpu: "1000m"
-      memory: "1Gi"
-  
-  # Database (PostgreSQL with RelStorage)
-  database:
-    type: "postgresql"
-  
-  # Persistence
-  persistence:
-    enabled: true
-    storageClass: "fast-ssd"
-    size: "50Gi"
-  
-  # Add-ons
-  addons:
-    - "plone.restapi"
-    - "plone.volto"
-  
-  # Environment variables
-  environment:
-    TZ: "America/New_York"
-    CORS_ALLOW_ORIGIN: "https://www.example.com"
-```
-
-### Creating Required Secrets
-
-Before deploying a PloneSite, create the admin password secret:
-
-```bash
-kubectl create secret generic plone-admin-password \
-  --from-literal=password='your-secure-password' \
-  --namespace=default
-```
-
-For PostgreSQL deployments, if using the integrated PostgreSQL from Helm chart:
-
-```bash
-kubectl create secret generic plonedb \
-  --from-literal=database-name='plone' \
-  --from-literal=database-user='plone' \
-  --from-literal=database-password='plone-password' \
-  --namespace=default
-```
-
-### Applying the Configuration
-
-```bash
-kubectl apply -f config/samples/plone_v1alpha1_plonesite.yaml
-```
-
-### Checking Status
-
-```bash
-# View PloneSite resources
-kubectl get plonesites
-
-# Detailed status
-kubectl describe plonesite my-plone
-
-# Check the underlying Helm release
-helm list -n default
-
-# Check operator logs
-kubectl logs -n plone-operator-system -l control-plane=controller-manager -f
-```
-
-## Deployment Types
-
-### Volto (Default)
-
-Modern Plone 6 deployment with:
-- Volto React-based frontend (port 3000)
-- Plone REST API backend (port 8080)
-- Suitable for headless CMS scenarios
-
-```yaml
-spec:
-  deploymentType: "volto"
-```
-
-### Classic
-
-Traditional Plone deployment with:
-- Classic UI served directly from backend
-- Single service on port 8080
-- Suitable for traditional Plone sites
-
-```yaml
-spec:
-  deploymentType: "classic"
-```
-
-## Virtual Host Monster (VHM) Configuration
-
-The VHM configuration is essential when Plone is accessed through an Ingress or LoadBalancer with a public domain name. Without proper VHM configuration, Plone will generate internal URLs instead of the public ones.
-
-### VHM Parameters
-
-- **vhmUrl**: The public URL where your Plone site is accessible (e.g., `https://www.example.com`)
-- **vhmPath**: The path component for your Plone site (defaults to `siteId`)
-
-### Example with Ingress
-
-The operator automatically configures ingress when `vhmUrl` is set:
-
-```yaml
-apiVersion: plone.org/v1alpha1
-kind: PloneSite
-metadata:
-  name: my-plone
-spec:
-  siteName: "My Site"
-  siteId: "Plone"
-  deploymentType: "volto"
-  
-  # VHM Configuration
-  vhmUrl: "https://myplone.example.com"
-  vhmPath: "Plone"
-  
-  # Ingress will be automatically configured
-  ingress:
-    enabled: true
-    className: "nginx"  # Use your ingress controller
-    tls: true
-```
-
-This will:
-1. Configure Plone backend to generate URLs with `https://myplone.example.com`
-2. Create an Ingress resource pointing to your domain
-3. Route traffic appropriately to frontend (Volto) and backend (API)
-
-### Without VHM (Internal Access Only)
-
-If you don't need external access, simply omit `vhmUrl`:
-
-```yaml
-spec:
-  siteName: "Internal Plone"
-  siteId: "Plone"
-  # No vhmUrl specified
-```
-
-Access the site via port-forward:
-```bash
-# For Volto deployment
-kubectl port-forward -n default service/my-plone-frontend 3000:3000
-
-# For Classic deployment
-kubectl port-forward -n default service/my-plone-backend 8080:8080
-```
-
-## Database Configuration
-
-The operator supports multiple database backends through the underlying Helm charts.
-
-### ZODB with ZEO (Default)
-
-Uses the ZEO server for ZODB storage. The Helm chart deploys a ZEO server automatically:
-
-```yaml
-spec:
   database:
     type: "zodb"
   persistence:
@@ -309,219 +97,296 @@ spec:
     size: "10Gi"
 ```
 
-### PostgreSQL (Integrated)
-
-Deploys a PostgreSQL StatefulSet alongside Plone using RelStorage:
-
-```yaml
-spec:
-  database:
-    type: "postgresql"
-  persistence:
-    enabled: true
-    size: "20Gi"  # For both Plone and PostgreSQL
-```
-
-**Note**: Create the database credentials secret before deployment:
+Create the required Secret first:
 
 ```bash
-kubectl create secret generic plonedb \
-  --from-literal=database-name='plone' \
-  --from-literal=database-user='plone' \
-  --from-literal=database-password='secure-password'
+kubectl create secret generic my-plone-admin \
+  --from-literal=username=admin --from-literal=password=changeme
 ```
 
-### PostgreSQL (External)
-
-To use an external PostgreSQL database:
+### Production example — Volto + CNPG PostgreSQL + Ingress
 
 ```yaml
+apiVersion: plone.org/v1alpha1
+kind: PloneSite
+metadata:
+  name: production-plone
+  namespace: default
 spec:
+  siteName: "Production Plone"
+  siteId: "Plone"
+  deploymentType: "volto"
+  image: "plone/plone-backend:6.0"
+  replicas: 3
+  vhmUrl: "https://www.example.com"
+  ingress:
+    enabled: true
+    className: "traefik"
+    tls: true
   database:
     type: "postgresql"
-    host: "postgres.example.com"
-    port: 5432
-    name: "plone"
-    user: "plone"
-    passwordSecret: "external-db-credentials"
+    cnpg: true
+    credentialsSecret: "production-plone-db"   # keys: username, password
+    packIntervalDays: 7
+  persistence:
+    enabled: true
+    storageClass: "fast-ssd"
+    size: "50Gi"
+  resources:
+    limits:
+      cpu: "4000m"
+      memory: "4Gi"
+    requests:
+      cpu: "1000m"
+      memory: "1Gi"
+  environment:
+    TZ: "America/New_York"
 ```
 
-## Resource Specifications
+Create the required Secrets first:
 
-All fields in the PloneSite CRD:
+```bash
+# Admin credentials
+kubectl create secret generic production-plone-admin \
+  --from-literal=username=admin --from-literal=password=changeme
+
+# CNPG bootstrap credentials (CNPG creates the runtime <name>-db-app Secret)
+kubectl create secret generic production-plone-db \
+  --from-literal=username=plone --from-literal=password=dbpassword
+```
+
+### Classic UI example
+
+```yaml
+apiVersion: plone.org/v1alpha1
+kind: PloneSite
+metadata:
+  name: classic-plone
+  namespace: default
+spec:
+  siteName: "Classic Plone"
+  siteId: "Plone"
+  deploymentType: "classic"
+  vhmUrl: "https://classic.example.com"
+  ingress:
+    enabled: true
+    className: "traefik"
+    tls: true
+  database:
+    type: "zodb"
+  persistence:
+    enabled: true
+    size: "20Gi"
+```
+
+## Field Reference
+
+### Top-level
 
 | Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `siteName` | string | "Plone" | Display name of the Plone site |
-| `siteId` | string | "plone" | URL path component for the site |
-| `deploymentType` | string | "volto" | Deployment type (volto or classic) |
-| `adminUser` | string | "admin" | Admin username |
-| `adminPasswordSecret` | string | "plone-admin-password" | Secret containing admin password |
-| `image` | string | "plone/plone-backend:6.0" | Plone backend container image |
-| `replicas` | integer | 1 | Number of backend replicas |
-| `vhmUrl` | string | "" | Virtual Host Monster URL |
-| `vhmPath` | string | siteId | VHM path component |
-| `ingress.enabled` | boolean | false | Enable ingress (auto-enabled if vhmUrl is set) |
-| `ingress.className` | string | "" | Ingress class (nginx, traefik, etc.) |
-| `ingress.tls` | boolean | false | Enable TLS for ingress |
-| `resources` | object | See CRD | CPU/memory limits and requests |
-| `database.type` | string | "zodb" | Database type (zodb or postgresql) |
-| `database.host` | string | "" | External database host (optional) |
-| `database.port` | integer | 5432 | External database port |
-| `persistence.enabled` | boolean | true | Enable persistent storage |
-| `persistence.size` | string | "10Gi" | PVC size |
-| `persistence.storageClass` | string | "" | Storage class name |
-| `addons` | array | [] | List of Plone add-ons |
-| `environment` | object | {} | Additional environment variables |
+|---|---|---|---|
+| `siteName` | string | `"Plone"` | Display name of the Plone site |
+| `siteId` | string | `"plone"` | URL path component (e.g. `/Plone`) |
+| `deploymentType` | string | `"volto"` | `volto` or `classic` |
+| `image` | string | `plone/plone-backend:latest` | Backend container image |
+| `replicas` | integer | `1` | Backend replica count |
+| `vhmUrl` | string | — | Public URL (e.g. `https://example.com`). Enables VHM and Ingress. |
+| `vhmPath` | string | `siteId` | Zope path component for VHM traversal |
+| `addons` | array | `[]` | Plone add-ons to activate |
+| `environment` | object | `{}` | Extra environment variables injected into the backend |
 
-## Helm Charts Used
+Admin credentials are always read from a Secret named `<cr-name>-admin`
+(keys: `username`, `password`). There is no field for this — the name is derived
+from the CR name to avoid collisions.
 
-The operator uses the official Plone Helm charts:
+### `ingress`
 
-- **plone6-volto-zeo**: For `deploymentType: volto` with `database.type: zodb`
-- **plone6-volto-pg**: For `deploymentType: volto` with `database.type: postgresql`
-- **plone6-classic-pg**: For `deploymentType: classic` with `database.type: postgresql`
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `false` | Create a Traefik Ingress |
+| `className` | string | `"traefik"` | Ingress class |
+| `tls` | boolean | `false` | Enable TLS on the Ingress |
 
-For more information about these charts, see the [Plone Helm Charts repository](https://github.com/plone/helm-charts).
+### `database`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `type` | string | `"zodb"` | `zodb` or `postgresql` |
+| `cnpg` | boolean | `false` | Use CloudNativePG for in-cluster PostgreSQL |
+| `credentialsSecret` | string | — | Secret name for PostgreSQL credentials (see below) |
+| `packIntervalDays` | integer | `7` | Days between db-pack jobs; `0` disables packing |
+
+**`credentialsSecret` key requirements:**
+
+| Scenario | Required keys |
+|---|---|
+| External PostgreSQL (`cnpg: false`) | `host`, `port`, `dbname`, `username`, `password` |
+| CNPG in-cluster (`cnpg: true`) | `username`, `password` (bootstrap only; runtime uses `<name>-db-app`) |
+
+### `persistence`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `false` | Create PVCs |
+| `size` | string | `"10Gi"` | PVC capacity |
+| `storageClass` | string | `""` | Storage class (empty = cluster default) |
+
+### `resources`
+
+Standard Kubernetes `resources` block (`limits` / `requests` with `cpu` and `memory`).
+
+## VHM and Ingress Behaviour
+
+### Volto (`deploymentType: volto`)
+
+When `vhmUrl` is set the operator:
+1. Sets `RAZZLE_API_PATH=<vhmUrl>` on the Volto frontend (browser-side API base URL).
+2. Sets `RAZZLE_INTERNAL_API_PATH=http://<name>-backend:8080/<siteId>` (Node.js SSR).
+3. Sets `CORS_ALLOW_ORIGIN=<vhmUrl>` on the backend.
+4. Creates a single Ingress with two `Prefix` paths:
+   - `/++api++` → `<name>-backend:8080` (REST API)
+   - `/` → `<name>-frontend:3000`
+
+No VHM Middleware is used for Volto — Traefik forwards `X-Forwarded-Host` and `X-Forwarded-Proto`, which the Plone backend uses to generate correct `@id` URLs.
+
+### Classic (`deploymentType: classic`)
+
+When `vhmUrl` is set the operator:
+1. Creates a Traefik `Middleware` that rewrites every incoming path to the VHM traversal URL:
+   ```
+   /VirtualHostBase/<scheme>/<host>/Plone/VirtualHostRoot/<original-path>
+   ```
+2. Creates an Ingress with a single `/` → `<name>-backend:8080` rule, annotated with the middleware.
+
+## Status Fields
+
+| Field | Description |
+|---|---|
+| `phase` | `Pending`, `Running`, or `Failed` |
+| `siteUrl` | Internal cluster URL of the Plone site |
+| `deploymentType` | Reflects the active `deploymentType` |
+| `vhmConfigured` | `true` if a `vhmUrl` was provided |
+| `lastPackTime` | ISO-8601 timestamp of the last db-pack job |
+| `conditions` | Standard Kubernetes condition array (`Ready`) |
+
+## Database Packing
+
+A Kopf timer fires daily and creates a one-off Kubernetes `Job` if
+`packIntervalDays` days have elapsed since `status.lastPackTime`.
+
+- **ZEO**: runs `zeopack` from `plone/plone-zeo:6`
+- **PostgreSQL**: runs a RelStorage `pack(days=0)` call via the backend image
+
+Set `packIntervalDays: 0` to disable packing entirely.
+Jobs are auto-deleted 24 hours after completion (`ttlSecondsAfterFinished: 86400`).
 
 ## Development
 
-### Project Structure
+### Project structure
 
 ```
 plone-operator/
-├── Dockerfile                      # Operator container image
-├── Makefile                        # Build and deployment targets
-├── watches.yaml                    # Ansible operator watches configuration
-├── requirements.yml                # Ansible collection dependencies
-├── config/
-│   ├── crd/bases/                 # CustomResourceDefinition
-│   │   └── plone.org_plonesites.yaml
-│   ├── rbac/                      # RBAC configuration
-│   │   ├── service_account.yaml
-│   │   ├── role.yaml
-│   │   └── role_binding.yaml
-│   ├── manager/                   # Operator deployment
-│   │   ├── namespace.yaml
-│   │   └── manager.yaml
-│   └── samples/                   # Example PloneSite CRs
-│       ├── plone_v1alpha1_plonesite.yaml
-│       └── simple_plonesite.yaml
-└── roles/
-    └── plonesite/                 # Ansible role for PloneSite
-        ├── defaults/
-        │   └── main.yml
-        └── tasks/
-            └── main.yml
+├── plone_operator.py          # Kopf operator (single file)
+├── pyproject.toml             # uv project / dependencies
+├── uv.lock
+├── Dockerfile
+├── Makefile
+└── config/
+    ├── crd/bases/             # PloneSite CRD
+    ├── rbac/                  # ServiceAccount, Role, RoleBinding
+    ├── manager/               # Operator Deployment + Namespace
+    └── samples/               # Example PloneSite CRs
 ```
 
-### Running Locally
+### Running locally (out-of-cluster)
 
 ```bash
-# Install Ansible collections
-ansible-galaxy collection install -r requirements.yml
+# Install dependencies
+uv sync
 
-# Install CRDs
+# Install CRDs into your current cluster context
 make install
 
-# Run operator locally (without building image)
-ansible-operator run
+# Run operator locally (uses ~/.kube/config)
+uv run kopf run plone_operator.py --verbose
 ```
 
-### Uninstalling
+### Linting and type checking
 
 ```bash
-# Remove sample CRs
-make undeploy-sample
-
-# Remove operator
-make undeploy
-
-# Remove CRDs
-make uninstall
+make lint       # ruff
+make typecheck  # ty
 ```
+
+### Minikube workflow
+
+```bash
+# Build image inside minikube's Docker daemon and restart the operator
+make minikube-load
+
+# Or: build + deploy everything from scratch
+make minikube-deploy
+```
+
+### Makefile targets
+
+| Target | Description |
+|---|---|
+| `make deploy` | Apply CRDs, RBAC, and operator Deployment |
+| `make undeploy` | Remove operator Deployment and RBAC |
+| `make install` | Apply CRDs only |
+| `make uninstall` | Remove CRDs |
+| `make deploy-sample` | Apply all files under `config/samples/` |
+| `make undeploy-sample` | Delete sample CRs |
+| `make minikube-load` | Build image in minikube daemon + rollout restart |
+| `make minikube-deploy` | `minikube-load` + `deploy` |
+| `make lint` | `ruff check plone_operator.py` |
+| `make typecheck` | `ty check plone_operator.py` |
 
 ## Troubleshooting
 
-### Check Operator Logs
+### Operator logs
 
 ```bash
 kubectl logs -n plone-operator-system deployment/plone-operator-controller-manager -f
 ```
 
-### Check PloneSite Status
+### PloneSite status
 
 ```bash
-kubectl describe plonesite <name> -n <namespace>
+kubectl get plonesites
+kubectl describe plonesite <name>
 ```
 
-### Check Helm Release
+### Pod not starting
 
 ```bash
-# List Helm releases
-helm list -n <namespace>
+# Check that the admin Secret exists with the correct name and keys
+kubectl get secret <cr-name>-admin -o yaml
 
-# Get Helm release details
-helm status <plonesite-name> -n <namespace>
-
-# Get Helm release values
-helm get values <plonesite-name> -n <namespace>
+# For PostgreSQL: check credentialsSecret and (for CNPG) <cr-name>-db-app
+kubectl get secret <credentialsSecret> -o yaml
+kubectl get secret <cr-name>-db-app -o yaml
 ```
 
-### Check Deployed Resources
+### Ingress not routing correctly
 
 ```bash
-# For Volto deployment
-kubectl get pods,svc,ingress -n <namespace> -l app.kubernetes.io/instance=<plonesite-name>
-
-# Check ZEO server (for ZODB)
-kubectl get statefulset -n <namespace>
-
-# Check PostgreSQL (if using integrated PostgreSQL)
-kubectl get statefulset -n <namespace> -l app.kubernetes.io/component=postgresql
+kubectl get ingress <cr-name>-ingress -o yaml
+# For Classic UI: verify the Traefik Middleware exists
+kubectl get middleware <cr-name>-vhm -o yaml
 ```
 
-### Common Issues
+### Database pack job not running
 
-1. **Pod not starting**: 
-   - Check if secrets exist: `kubectl get secret -n <namespace>`
-   - Verify the secret contains correct keys (`password` for admin, `database-*` for PostgreSQL)
+```bash
+# Check status.lastPackTime and packIntervalDays
+kubectl get plonesite <name> -o jsonpath='{.status.lastPackTime}'
 
-2. **VHM not working**: 
-   - Verify `vhmUrl` and `vhmPath` are correctly set
-   - Check ingress is created: `kubectl get ingress -n <namespace>`
-   - Ensure ingress controller is installed and working
-
-3. **Helm deployment fails**:
-   - Check Helm repository is accessible: `helm repo list`
-   - Update Helm repos: `helm repo update`
-   - Check operator logs for Helm errors
-
-4. **Persistence issues**: 
-   - Check if StorageClass exists: `kubectl get storageclass`
-   - Verify PVC is bound: `kubectl get pvc -n <namespace>`
-   - Check storage capacity
-
-5. **Database connection issues**:
-   - For PostgreSQL: Verify secret has correct keys (database-name, database-user, database-password)
-   - Check PostgreSQL pod is running: `kubectl get pods -n <namespace> | grep postgres`
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+# List completed pack jobs
+kubectl get jobs -l app.kubernetes.io/component=db-pack
+```
 
 ## License
 
-This project is licensed under the Apache License 2.0.
-
-## API Reference
-
-### PloneSite v1alpha1
-
-The PloneSite custom resource represents a Plone site deployment in Kubernetes.
-
-**API Group**: `plone.org`  
-**API Version**: `v1alpha1`  
-**Kind**: `PloneSite`
-
-For the complete API specification, see the CRD definition in `config/crd/bases/plone.org_plonesites.yaml`.
+Apache License 2.0
