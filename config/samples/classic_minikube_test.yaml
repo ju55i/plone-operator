@@ -1,0 +1,26 @@
+apiVersion: plone.org/v1alpha1
+kind: PloneSite
+metadata:
+  name: classic-plone
+  namespace: default
+spec:
+  deploymentType: "classic"
+  siteId: "Plone"
+  adminPasswordSecret: "plone-admin-password"
+  image: "plone/plone-backend:latest"
+  replicas: 1
+
+  # nip.io resolves *.192.168.49.2.nip.io → 192.168.49.2 (minikube IP)
+  # Traefik HTTP NodePort is 30121.
+  # The operator will create a Traefik Middleware that rewrites every
+  # incoming path to:
+  #   /VirtualHostBase/http/classic-plone.192.168.49.2.nip.io:30121/Plone/VirtualHostRoot/<path>
+  vhmUrl: "http://classic-plone.192.168.49.2.nip.io:30121"
+  vhmPath: "Plone"
+
+  ingress:
+    enabled: true
+    className: "traefik"
+
+  database:
+    type: "zodb"

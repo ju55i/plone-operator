@@ -48,10 +48,6 @@ spec:
                   enum:
                     - volto
                     - classic
-                adminUser:
-                  description: Admin username for the Plone site
-                  type: string
-                  default: "admin"
                 adminPasswordSecret:
                   description: Secret name containing the admin password
                   type: string
@@ -124,21 +120,38 @@ spec:
                         - zodb
                         - postgresql
                         - mysql
-                    host:
-                      description: Database host
+                    cnpg:
+                      description: >
+                        Use CloudNativePG for in-cluster PostgreSQL.
+                        When true the operator creates a CNPG Cluster and reads
+                        runtime credentials from the auto-created
+                        <name>-db-app Secret.
+                        When false (default) an external PostgreSQL server is
+                        expected and all connection details come from
+                        credentialsSecret.
+                      type: boolean
+                      default: false
+                    credentialsSecret:
+                      description: >
+                        Name of the Secret that holds database credentials.
+                        Required for type=postgresql.
+
+                        For external PostgreSQL (cnpg: false) the Secret must
+                        contain: host, port (optional), dbname (optional),
+                        username, password.
+
+                        For in-cluster CNPG (cnpg: true) the Secret must
+                        contain: username, password.  It is used only for
+                        CNPG cluster bootstrap; the operator uses the
+                        CNPG-generated <name>-db-app Secret at runtime.
                       type: string
-                    port:
-                      description: Database port
+                    packIntervalDays:
+                      description: >
+                        How often to pack the database (days).
+                        Set to 0 to disable automatic packing.
                       type: integer
-                    name:
-                      description: Database name
-                      type: string
-                    user:
-                      description: Database user
-                      type: string
-                    passwordSecret:
-                      description: Secret name containing database password
-                      type: string
+                      default: 7
+                      minimum: 0
                 persistence:
                   description: Persistence configuration
                   type: object
@@ -198,6 +211,10 @@ spec:
                 deploymentType:
                   description: Type of deployment (volto or classic)
                   type: string
+                lastPackTime:
+                  description: ISO-8601 timestamp of the last successful db_pack job creation
+                  type: string
+                  format: date-time
       subresources:
         status: {}
       additionalPrinterColumns:

@@ -224,7 +224,15 @@ def build_zeo_service(name: str, namespace: str, spec: dict[str, Any]) -> dict[s
 
 
 def build_cnpg_cluster(name: str, namespace: str, spec: dict[str, Any]) -> dict[str, Any]:
-    """Build a CloudNativePG Cluster CR for in-cluster PostgreSQL."""
+    """Build a CloudNativePG Cluster CR for in-cluster PostgreSQL.
+
+    The bootstrap secret (database.credentialsSecret) must have ``username``
+    and ``password`` keys.  CNPG creates the app user from those values and
+    auto-creates a ``<name>-db-app`` Secret with full connection details
+    (host, port, dbname, username, password) that the operator uses at runtime.
+    """
+    db_cfg = spec.get("database", {})
+    creds_secret = db_cfg.get("credentialsSecret", "plonedb-credentials")
     persistence = spec.get("persistence", {})
     storage_class = persistence.get("storageClass")
     size = persistence.get("size", "10Gi")
@@ -239,7 +247,7 @@ def build_cnpg_cluster(name: str, namespace: str, spec: dict[str, Any]) -> dict[
             "initdb": {
                 "database": "plone",
                 "owner": "plone",
-                "secret": {"name": spec.get("database", {}).get("passwordSecret", "plonedb-credentials")},
+                "secret": {"name": creds_secret},
             }
         },
     }
@@ -727,34 +735,47 @@ async def reconcile(spec, meta, status, patch, logger, **kwargs):
 
     elif db_type == "postgresql":
         db_cfg = spec.get("database", {})
-        db_host = db_cfg.get("host", "")
-        password_secret = db_cfg.get("passwordSecret", "plonedb-credentials")
+        use_cnpg = db_cfg.get("cnpg", False)
+        creds_secret = db_cfg.get("credentialsSecret", "plonedb-credentials")
 
-        # DB_PASSWORD is injected from the Secret first so that Kubernetes
-        # variable substitution resolves $(DB_PASSWORD) in RELSTORAGE_DSN.
-        db_secret_envs.append(_secret_env("DB_PASSWORD", password_secret, "password"))
-
-        if db_host:
-            # External PostgreSQL
-            db_port = db_cfg.get("port", 5432)
-            db_name = db_cfg.get("name", "plone")
-            db_user = db_cfg.get("user", "plone")
+        if not use_cnpg:
+            # External PostgreSQL: all connection details come from credentialsSecret.
+            # Keys expected: host, port (optional→5432), dbname (optional→plone),
+            #                username, password.
+            # Inject as env vars first so Kubernetes variable substitution resolves
+            # $(DB_*) references inside RELSTORAGE_DSN.
+            db_secret_envs += [
+                _secret_env("DB_HOST",     creds_secret, "host"),
+                _secret_env("DB_PORT",     creds_secret, "port"),
+                _secret_env("DB_NAME",     creds_secret, "dbname"),
+                _secret_env("DB_USER",     creds_secret, "username"),
+                _secret_env("DB_PASSWORD", creds_secret, "password"),
+            ]
             db_env["RELSTORAGE_DSN"] = (
-                f"host={db_host} port={db_port} dbname={db_name} "
-                f"user={db_user} password=$(DB_PASSWORD)"
+                "host=$(DB_HOST) port=$(DB_PORT) dbname=$(DB_NAME) "
+                "user=$(DB_USER) password=$(DB_PASSWORD)"
             )
         else:
-            # In-cluster PostgreSQL via CloudNativePG
+            # In-cluster PostgreSQL via CloudNativePG.
+            # creds_secret (username+password) is used only for CNPG bootstrap.
+            # At runtime the operator uses the CNPG-auto-created <name>-db-app
+            # Secret which contains host, port, dbname, username, password.
             cnpg_cluster = build_cnpg_cluster(name, namespace, spec)
             kopf.adopt(cnpg_cluster)
             manifests.append(cnpg_cluster)
-            # Apply CNPG cluster first so it starts provisioning
             _apply_manifest(cnpg_cluster)
-            # Wait for the CNPG read-write service to appear
-            svc_name = await _wait_for_cnpg_service(name, namespace)
+            await _wait_for_cnpg_service(name, namespace)
+            runtime_secret = f"{name}-db-app"
+            db_secret_envs += [
+                _secret_env("DB_HOST",     runtime_secret, "host"),
+                _secret_env("DB_PORT",     runtime_secret, "port"),
+                _secret_env("DB_NAME",     runtime_secret, "dbname"),
+                _secret_env("DB_USER",     runtime_secret, "username"),
+                _secret_env("DB_PASSWORD", runtime_secret, "password"),
+            ]
             db_env["RELSTORAGE_DSN"] = (
-                f"host={svc_name}.{namespace}.svc.cluster.local port=5432 "
-                f"dbname=plone user=plone password=$(DB_PASSWORD)"
+                "host=$(DB_HOST) port=$(DB_PORT) dbname=$(DB_NAME) "
+                "user=$(DB_USER) password=$(DB_PASSWORD)"
             )
 
     # -------------------------------------------------------------------
@@ -860,42 +881,72 @@ async def on_delete(meta, spec, logger, **kwargs):
 # Weekly database pack job
 # ---------------------------------------------------------------------------
 
-@kopf.timer("plone.org", "v1alpha1", "plonesites", interval=604800.0, idle=300.0)  # ty: ignore[invalid-argument-type]
-async def db_pack(spec, meta, logger, **kwargs):
-    """Create a one-off Job to pack the database weekly."""
+@kopf.timer("plone.org", "v1alpha1", "plonesites", interval=86400.0)  # ty: ignore[invalid-argument-type]
+async def db_pack(spec, meta, status, patch, logger, **kwargs):
+    """Create a one-off Job to pack the database.
+
+    Fires daily but respects ``database.packIntervalDays`` (default 7).
+    Set ``packIntervalDays: 0`` to disable automatic packing entirely.
+    Records ``status.lastPackTime`` after each job is created so the
+    interval check works correctly across operator restarts.
+    """
     name = _name(meta)
     namespace = _namespace(meta)
-    db_type = spec.get("database", {}).get("type", "zodb")
+    db_cfg = spec.get("database", {})
+    db_type = db_cfg.get("type", "zodb")
 
+    # --- interval / disabled check -------------------------------------------
+    pack_interval_days: int = db_cfg.get("packIntervalDays", 7)
+    if pack_interval_days == 0:
+        logger.debug("db_pack: packIntervalDays=0, skipping")
+        return
+
+    last_pack_str: str | None = status.get("lastPackTime")
+    if last_pack_str:
+        last_pack = datetime.datetime.fromisoformat(last_pack_str)
+        elapsed = datetime.datetime.now(datetime.UTC) - last_pack
+        if elapsed.days < pack_interval_days:
+            logger.debug(
+                "db_pack: %d day(s) since last pack, interval is %d — skipping",
+                elapsed.days,
+                pack_interval_days,
+            )
+            return
+
+    # --- build job spec -------------------------------------------------------
     ts = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d%H%M%S")
     job_name = f"{name}-pack-{ts}"
 
     backend_image = spec.get("image", "plone/plone-backend:latest")
-    db_cfg = spec.get("database", {})
 
     if db_type == "zodb":
         # plone/plone-zeo ships zeopack at /app/bin/zeopack.
         # It accepts servers as positional args: host:port
         zeo_host = f"{name}-zeo.{namespace}.svc.cluster.local"
         pack_image = "plone/plone-zeo:6"
-        pack_env = []
+        pack_env: list[dict] = []
         pack_command = ["/app/bin/zeopack", f"{zeo_host}:8100"]
     elif db_type == "postgresql":
         # Use the backend image which has RelStorage installed.
-        # /app/bin/python is the venv Python inside the backend image.
-        db_host = db_cfg.get("host", f"{name}-db-rw.{namespace}.svc.cluster.local")
-        db_port = db_cfg.get("port", 5432)
-        db_name = db_cfg.get("name", "plone")
-        db_user = db_cfg.get("user", "plone")
-        password_secret = db_cfg.get("passwordSecret", "plonedb-credentials")
-        # DB_PASSWORD must come before RELSTORAGE_DSN for k8s substitution
+        use_cnpg = db_cfg.get("cnpg", False)
+        creds_secret = db_cfg.get("credentialsSecret", "plonedb-credentials")
+        # CNPG runtime secret has the full connection info; external PG uses
+        # credentialsSecret directly (same key names: host, port, dbname,
+        # username, password).
+        runtime_secret = f"{name}-db-app" if use_cnpg else creds_secret
         pack_image = backend_image
+        # Inject individual DB_* vars first so Kubernetes variable substitution
+        # resolves $(DB_*) references inside RELSTORAGE_DSN.
         pack_env = [
-            _secret_env("DB_PASSWORD", password_secret, "password"),
+            _secret_env("DB_HOST",     runtime_secret, "host"),
+            _secret_env("DB_PORT",     runtime_secret, "port"),
+            _secret_env("DB_NAME",     runtime_secret, "dbname"),
+            _secret_env("DB_USER",     runtime_secret, "username"),
+            _secret_env("DB_PASSWORD", runtime_secret, "password"),
             *_make_env_list({
                 "RELSTORAGE_DSN": (
-                    f"host={db_host} port={db_port} "
-                    f"dbname={db_name} user={db_user} password=$(DB_PASSWORD)"
+                    "host=$(DB_HOST) port=$(DB_PORT) "
+                    "dbname=$(DB_NAME) user=$(DB_USER) password=$(DB_PASSWORD)"
                 ),
             }),
         ]
@@ -950,4 +1001,5 @@ async def db_pack(spec, meta, logger, **kwargs):
 
     kopf.adopt(job_manifest)
     _apply_manifest(job_manifest)
+    patch.status["lastPackTime"] = datetime.datetime.now(datetime.UTC).isoformat()
     logger.info("Created DB pack job %s/%s", namespace, job_name)

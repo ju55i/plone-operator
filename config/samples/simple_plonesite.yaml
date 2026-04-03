@@ -11,8 +11,7 @@ spec:
   # Use Volto frontend (default)
   deploymentType: "volto"
 
-  # Use default admin credentials (create secret manually)
-  adminUser: "admin"
+  # Admin credentials (username read from Secret key 'username')
   adminPasswordSecret: "plone-admin-password"
 
   # Single replica for development

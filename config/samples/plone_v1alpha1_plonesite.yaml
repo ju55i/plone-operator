@@ -7,33 +7,31 @@ spec:
   # Site configuration
   siteName: "My Plone Site"
   siteId: "plone"
-  
+
   # Deployment type: 'volto' (frontend+backend) or 'classic' (backend-only)
   deploymentType: "volto"
-  
-  # Admin credentials
-  adminUser: "admin"
+
+  # Admin credentials (username read from Secret key 'username')
   adminPasswordSecret: "plone-admin-password"
-  
+
   # Plone backend image
   image: "plone/plone-backend:6.0"
-  
+
   # Number of replicas
   replicas: 2
-  
+
   # Virtual Host Monster configuration
   # The public URL Plone uses when generating links.
   # For Classic UI: Traefik Middleware rewrites paths to the VHM traversal URL.
   # For Volto: sets RAZZLE_API_PATH on the frontend.
   vhmUrl: "https://myplone.example.com"
-  vhmPath: "plone"
-  
+
   # Ingress configuration
   ingress:
     enabled: true
     className: "traefik"
     tls: true
-  
+
   # Resource requirements
   resources:
     limits:
@@ -42,24 +40,26 @@ spec:
     requests:
       cpu: "500m"
       memory: "512Mi"
-  
+
   # Database configuration
-  # 'zodb' uses ZEO server (included in helm chart)
-  # 'postgresql' uses PostgreSQL (can be included or external)
+  # 'zodb' uses ZEO server (in-cluster StatefulSet).
+  # 'postgresql' uses PostgreSQL (in-cluster CNPG or external).
   database:
     type: "zodb"
-  
+    # Pack the database weekly (set to 0 to disable).
+    packIntervalDays: 7
+
   # Persistence configuration
   persistence:
     enabled: true
     storageClass: ""  # Use default storage class
     size: "10Gi"
-  
+
   # Optional: Plone add-ons to install
   addons:
     - "plone.restapi"
     - "plone.volto"
-  
+
   # Optional: Additional environment variables
   environment:
     TZ: "UTC"

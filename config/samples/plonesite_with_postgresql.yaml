@@ -7,31 +7,29 @@ spec:
   # Site configuration
   siteName: "Plone with PostgreSQL"
   siteId: "Plone"
-  
+
   # Use Volto frontend
   deploymentType: "volto"
-  
-  # Admin credentials
-  adminUser: "admin"
+
+  # Admin credentials (username read from Secret key 'username')
   adminPasswordSecret: "plone-admin-password"
-  
+
   # Backend image
   image: "plone/plone-backend:6.0"
-  
+
   # High availability setup
   replicas: 3
-  
+
   # Virtual Host Monster: the public URL Plone uses when generating links.
   # RAZZLE_API_PATH for the Volto frontend is also set to this URL.
   vhmUrl: "https://www.example.com"
-  vhmPath: "Plone"
-  
+
   # Ingress with TLS
   ingress:
     enabled: true
     className: "traefik"
     tls: true
-  
+
   # Production resources
   resources:
     limits:
@@ -40,23 +38,30 @@ spec:
     requests:
       cpu: "1000m"
       memory: "1Gi"
-  
-  # PostgreSQL database
-  # This will deploy a PostgreSQL StatefulSet with the Plone instance
+
+  # PostgreSQL database via CloudNativePG (in-cluster).
+  # credentialsSecret must contain keys: username, password
+  # (used for CNPG bootstrap; runtime credentials come from <name>-db-app Secret).
+  #
+  # For external PostgreSQL set cnpg: false and provide a Secret with keys:
+  #   host, port, dbname, username, password.
   database:
     type: "postgresql"
-  
+    cnpg: true
+    credentialsSecret: "plone-db-credentials"
+    packIntervalDays: 7
+
   # Persistent storage
   persistence:
     enabled: true
     storageClass: "fast-ssd"
     size: "50Gi"
-  
+
   # Plone add-ons
   addons:
     - "plone.restapi"
     - "plone.volto"
-  
+
   # Environment variables
   environment:
     TZ: "America/New_York"

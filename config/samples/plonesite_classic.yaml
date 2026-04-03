@@ -7,41 +7,43 @@ spec:
   # Classic Plone deployment (no Volto frontend)
   siteName: "Plone Classic"
   siteId: "Plone"
-  
+
   # Use Classic UI (traditional Plone interface)
   deploymentType: "classic"
-  
-  # Admin credentials
-  adminUser: "admin"
+
+  # Admin credentials (username read from Secret key 'username')
   adminPasswordSecret: "plone-admin-password"
-  
+
   # Backend image
   image: "plone/plone-backend:6.0"
-  
+
   # Number of replicas
   replicas: 2
-  
+
   # VHM: the public URL Plone should use when generating links.
   # The operator builds the Traefik Middleware that rewrites incoming paths to:
   #   /VirtualHostBase/https/classic.example.com/Plone/VirtualHostRoot/<path>
   vhmUrl: "https://classic.example.com"
-  vhmPath: "Plone"
-  
+
   # Ingress configuration
   ingress:
     enabled: true
     className: "traefik"
     tls: true
-  
-  # Use PostgreSQL with RelStorage
+
+  # External PostgreSQL with RelStorage.
+  # credentialsSecret must contain keys: host, port, dbname, username, password.
   database:
     type: "postgresql"
-  
+    cnpg: false
+    credentialsSecret: "plone-db-credentials"
+    packIntervalDays: 7
+
   # Persistence
   persistence:
     enabled: true
     size: "20Gi"
-  
+
   # Resources
   resources:
     limits:
@@ -50,7 +52,7 @@ spec:
     requests:
       cpu: "500m"
       memory: "512Mi"
-  
+
   # Environment
   environment:
     TZ: "UTC"
