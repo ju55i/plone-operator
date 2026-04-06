@@ -127,6 +127,7 @@ spec:
   siteId: "Plone"
   deploymentType: "volto"
   image: "plone/plone-backend:6.0"
+  frontendImage: "plone/plone-frontend:18"
   replicas: 3
   publicUrl: "https://www.example.com"
   ingress:
@@ -191,6 +192,7 @@ spec:
 | `siteId` | string | `"plone"` | URL path component (e.g. `/Plone`) |
 | `deploymentType` | string | `"volto"` | `volto` or `classic` |
 | `image` | string | `plone/plone-backend:latest` | Backend container image |
+| `frontendImage` | string | `plone/plone-frontend:latest` | Volto frontend container image (only used when `deploymentType: volto`) |
 | `replicas` | integer | `1` | Backend replica count |
 | `publicUrl` | string | — | Public URL of the site (e.g. `https://example.com`). Enables Ingress and VHM rewriting. |
 | `sitePath` | string | `siteId` | Zope traversal path to the site object; used for Classic UI path rewriting. |

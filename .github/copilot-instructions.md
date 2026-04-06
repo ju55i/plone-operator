@@ -110,6 +110,7 @@ Key spec fields:
 | `deploymentType` | `volto` | `volto` or `classic` |
 | `siteId` | `plone` | Zope site path |
 | `image` | `plone/plone-backend:latest` | Backend image |
+| `frontendImage` | `plone/plone-frontend:latest` | Volto frontend image (only when `deploymentType: volto`) |
 | `replicas` | `1` | Backend replicas |
 | `publicUrl` | — | Public URL of the site; enables Ingress creation |
 | `sitePath` | `siteId` | Zope traversal path; used for Classic UI path rewriting |
@@ -143,7 +144,7 @@ plone-operator/
 | File | Scenario |
 |---|---|
 | `simple_plonesite.yaml` | Volto + ZEO, minikube nip.io URL |
-| `plone_v1alpha1_plonesite.yaml` | Volto + ZEO, full-featured with publicUrl + Ingress |
+| `plonesite_volto.yaml` | Volto + ZEO, full-featured with publicUrl + Ingress |
 | `plonesite_with_postgresql.yaml` | Volto + CNPG PostgreSQL, production |
 | `plonesite_classic.yaml` | Classic UI + external PostgreSQL |
 | `classic_minikube_test.yaml` | Classic UI + ZEO, minikube nip.io URL |
