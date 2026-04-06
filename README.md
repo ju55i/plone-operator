@@ -126,7 +126,7 @@ metadata:
 spec:
   siteId: "Plone"
   deploymentType: "volto"
-  image: "plone/plone-backend:6.0"
+  backendImage: "plone/plone-backend:6.0"
   frontendImage: "plone/plone-frontend:18"
   replicas: 3
   publicUrl: "https://www.example.com"
@@ -191,7 +191,7 @@ spec:
 |---|---|---|---|
 | `siteId` | string | `"plone"` | URL path component (e.g. `/Plone`) |
 | `deploymentType` | string | `"volto"` | `volto` or `classic` |
-| `image` | string | `plone/plone-backend:latest` | Backend container image |
+| `backendImage` | string | `plone/plone-backend:latest` | Backend container image |
 | `frontendImage` | string | `plone/plone-frontend:latest` | Volto frontend container image (only used when `deploymentType: volto`) |
 | `replicas` | integer | `1` | Backend replica count |
 | `publicUrl` | string | — | Public URL of the site (e.g. `https://example.com`). Enables Ingress and VHM rewriting. |
@@ -301,7 +301,7 @@ Patch the backend (and optionally frontend) image:
 
 ```bash
 kubectl patch plonesite <name> -n plone --type=merge \
-  -p '{"spec":{"image":"plone/plone-backend:6.1","frontendImage":"plone/plone-frontend:18"}}'
+  -p '{"spec":{"backendImage":"plone/plone-backend:6.1","frontendImage":"plone/plone-frontend:18"}}'
 ```
 
 The operator will:

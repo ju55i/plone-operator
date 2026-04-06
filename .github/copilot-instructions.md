@@ -109,7 +109,7 @@ Key spec fields:
 |---|---|---|
 | `deploymentType` | `volto` | `volto` or `classic` |
 | `siteId` | `plone` | Zope site path |
-| `image` | `plone/plone-backend:latest` | Backend image |
+| `backendImage` | `plone/plone-backend:latest` | Backend image |
 | `frontendImage` | `plone/plone-frontend:latest` | Volto frontend image (only when `deploymentType: volto`) |
 | `replicas` | `1` | Backend replicas |
 | `publicUrl` | — | Public URL of the site; enables Ingress creation |

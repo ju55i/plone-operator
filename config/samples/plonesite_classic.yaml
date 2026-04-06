@@ -16,7 +16,7 @@ spec:
   #   --from-literal=username=admin --from-literal=password=changeme
 
   # Backend image
-  image: "plone/plone-backend:6.0"
+  backendImage: "plone/plone-backend:6.0"
 
   # Number of replicas
   replicas: 2

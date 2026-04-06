@@ -8,7 +8,7 @@ spec:
   siteId: "Plone"
 
   # Use Plone 6.1 backend image (6.1.4 as of 2026-01-15)
-  image: "plone/plone-backend:6.1"
+  backendImage: "plone/plone-backend:6.1"
 
   # Plone 6.1 ships with Volto 18.x
   frontendImage: "plone/plone-frontend:18"

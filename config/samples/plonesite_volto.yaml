@@ -15,7 +15,7 @@ spec:
   #   --from-literal=username=admin --from-literal=password=changeme
 
   # Plone backend image
-  image: "plone/plone-backend:6.0"
+  backendImage: "plone/plone-backend:6.0"
 
   # Volto frontend image (only used when deploymentType: volto)
   frontendImage: "plone/plone-frontend:18"

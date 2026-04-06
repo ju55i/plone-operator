@@ -9,7 +9,7 @@ spec:
   # Admin credentials are read from a Secret named "<cr-name>-admin".
   # kubectl create secret generic classic-plone-admin \
   #   --from-literal=username=admin --from-literal=password=changeme
-  image: "plone/plone-backend:latest"
+  backendImage: "plone/plone-backend:latest"
   replicas: 1
 
   # QEMU driver: minikube IP is not reachable from host.

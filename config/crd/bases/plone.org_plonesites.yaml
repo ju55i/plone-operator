@@ -44,7 +44,7 @@ spec:
                   enum:
                     - volto
                     - classic
-                image:
+                backendImage:
                   description: Plone backend container image
                   type: string
                   default: "plone/plone-backend:latest"

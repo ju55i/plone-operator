@@ -285,7 +285,7 @@ def build_backend_deployment(
     """
     site_id = spec.get("siteId", "plone")
     admin_password_secret = f"{name}-admin"
-    backend_image = spec.get("image", "plone/plone-backend:latest")
+    backend_image = spec.get("backendImage", "plone/plone-backend:latest")
     replicas = spec.get("replicas", 1)
     resources = spec.get("resources", {})
     addons = spec.get("addons", [])
@@ -1070,7 +1070,7 @@ async def db_pack(spec, meta, status, patch, logger, **kwargs):
     ts = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d%H%M%S")
     job_name = f"{name}-pack-{ts}"
 
-    backend_image = spec.get("image", "plone/plone-backend:latest")
+    backend_image = spec.get("backendImage", "plone/plone-backend:latest")
 
     if db_type == "zodb":
         # plone/plone-zeo ships zeopack at /app/bin/zeopack.
