@@ -98,14 +98,7 @@ kind: PloneSite
 metadata:
   name: my-plone
   namespace: plone
-spec:
-  siteId: "Plone"
-  deploymentType: "volto"
-  database:
-    type: "zodb"
-  persistence:
-    enabled: true
-    size: "10Gi"
+spec: {}
 ```
 
 Create the required Secret first:

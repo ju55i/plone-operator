@@ -5,7 +5,7 @@ metadata:
   namespace: plone
 spec:
   # Site configuration
-  siteId: "plone"
+  siteId: "Plone"
 
   # Deployment type: 'volto' (frontend+backend) or 'classic' (backend-only)
   deploymentType: "volto"

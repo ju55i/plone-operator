@@ -108,7 +108,7 @@ Key spec fields:
 | Field | Default | Notes |
 |---|---|---|
 | `deploymentType` | `volto` | `volto` or `classic` |
-| `siteId` | `plone` | Zope site path |
+| `siteId` | `Plone` | Zope site path |
 | `backendImage` | `plone/plone-backend:latest` | Backend image |
 | `frontendImage` | `plone/plone-frontend:latest` | Volto frontend image (only when `deploymentType: volto`) |
 | `replicas` | `1` | Backend replicas |

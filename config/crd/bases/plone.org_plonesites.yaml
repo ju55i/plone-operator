@@ -36,7 +36,7 @@ spec:
                 siteId:
                   description: ID of the Plone site (URL path component)
                   type: string
-                  default: "plone"
+                  default: "Plone"
                 deploymentType:
                   description: Type of deployment (volto for frontend+backend, classic for backend-only)
                   type: string

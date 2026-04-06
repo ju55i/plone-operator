@@ -283,7 +283,7 @@ def build_backend_deployment(
     db_secret_envs: pre-built env entries that use secretKeyRef (injected BEFORE db_env
                     so that k8s variable substitution works for values like $(DB_PASSWORD))
     """
-    site_id = spec.get("siteId", "plone")
+    site_id = spec.get("siteId", "Plone")
     admin_password_secret = f"{name}-admin"
     backend_image = spec.get("backendImage", "plone/plone-backend:latest")
     replicas = spec.get("replicas", 1)
@@ -382,7 +382,7 @@ def build_backend_service(name: str, namespace: str) -> dict[str, Any]:
 
 
 def build_frontend_deployment(name: str, namespace: str, spec: dict[str, Any]) -> dict[str, Any]:
-    site_id = spec.get("siteId", "plone")
+    site_id = spec.get("siteId", "Plone")
     public_url = spec.get("publicUrl", "")
     frontend_image = spec.get("frontendImage", "plone/plone-frontend:latest")
     replicas = spec.get("replicas", 1)
@@ -490,7 +490,7 @@ def build_traefik_middleware(name: str, namespace: str, spec: dict[str, Any]) ->
     ``traefik.containo.us/v1alpha1`` — adjust ``apiVersion`` if needed.
     """
     public_url = spec.get("publicUrl", "")
-    site_id = spec.get("siteId", "plone")
+    site_id = spec.get("siteId", "Plone")
     site_path = spec.get("sitePath", site_id)
     deployment_type = spec.get("deploymentType", "volto")
     rewrite_base = _classic_rewrite_path(public_url, site_path)
@@ -969,7 +969,7 @@ async def reconcile(spec, meta, status, patch, logger, **kwargs):
     # -------------------------------------------------------------------
     # Wait for Plone backend to initialise the site
     # -------------------------------------------------------------------
-    site_id = spec.get("siteId", "plone")
+    site_id = spec.get("siteId", "Plone")
     backend_svc_name = f"{name}-backend"
     await _wait_for_plone(backend_svc_name, namespace, site_id)
 
